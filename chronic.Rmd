@@ -1,0 +1,423 @@
+---
+title: "Chronic Risk Calculations"
+author: "Paige Varner"
+date: "2024-05-20"
+output: html_document
+---
+
+#load libraries and data
+```{r}
+library("dplyr")
+library("bigrquery")
+library("DBI")
+library("pheatmap")
+library("RColorBrewer")
+library("Rmisc")
+library("stats")
+library("rstatix")
+library("ggplot2")
+library("tidyr")
+library("car")
+library("janitor")
+library("dunn.test")
+library("sf")
+
+ozone = read.csv("~/CO_CRA/CO_CRA/Data/Ozone8hour2018to2023.csv")
+anthem = read.csv("~/CO_CRA/CO_CRA/Data/weekly_Anthem.csv")
+commons = read.csv("~/CO_CRA/CO_CRA/Data/weekly_Commons.csv")
+ica = read.csv("~/CO_CRA/CO_CRA/Data/weekly_ICA.csv")
+icb = read.csv("~/CO_CRA/CO_CRA/Data/weekly_ICB.csv")
+livingston = read.csv("~/CO_CRA/CO_CRA/Data/weekly_Livingston.csv")
+nwa = read.csv("~/CO_CRA/CO_CRA/Data/weekly_NWA.csv")
+nwb = read.csv("~/CO_CRA/CO_CRA/Data/weekly_NWB.csv")
+united = read.csv("~/CO_CRA/CO_CRA/Data/weekly_United.csv")
+wildgrass = read.csv("~/CO_CRA/CO_CRA/Data/weekly_Wildgrass.csv")
+
+rfcs = read.csv("~/CO_CRA/CO_CRA/Data/RfCs.csv")
+iurs = read.csv("~/CO_CRA/CO_CRA/Data/IURs.csv")
+```
+
+
+#combine all sites to merge ozone data
+```{r}
+#add location name to each df to separate later
+anthem$Sampling.Site = "Anthem"
+commons$Sampling.Site = "Commons"
+ica$Sampling.Site = "Interchange A"
+icb$Sampling.Site = "Interchange B"
+livingston$Sampling.Site = "Livingston"
+nwa$Sampling.Site = "Northwest A"
+nwb$Sampling.Site = "Northwest B"
+united$Sampling.Site = "United"
+wildgrass$Sampling.Site = "Wildgrass"
+
+#combine
+all = bind_rows(anthem, commons, ica, icb, livingston, nwa, nwb, united, wildgrass)
+```
+
+
+#calculate 95th percentile of ozone mean within specified weekly dates
+```{r}
+#convert date columns to date class
+all$Start.Date.Time <- as.Date(all$Start.Date.Time)
+all$Stop.Date.Time <- as.Date(all$Stop.Date.Time)
+ozone$Date.Local <- as.Date(ozone$Date.Local)
+
+# Initialize a vector to store the results
+ozone_percentiles <- numeric(nrow(all))
+
+# Iterate over each row in the united dataframe
+for (i in 1:nrow(all)) {
+  start_date <- all$Start.Date.Time[i]
+  stop_date <- all$Stop.Date.Time[i]
+  
+  # Filter ozone dataframe for the date range
+  filtered_ozone <- ozone %>%
+    filter(Date.Local >= start_date & Date.Local <= stop_date)
+  
+  # Calculate the 95th percentile of the Arithmetic.Mean values
+  if (nrow(filtered_ozone) > 0) {
+    percentile_95 <- quantile(filtered_ozone$Arithmetic.Mean, 0.95)
+  } else {
+    percentile_95 <- NA
+  }
+  
+  # Store the result in the vector
+  ozone_percentiles[i] <- percentile_95
+}
+
+# Add the results as a new column in the united dataframe
+all$Ozone <- ozone_percentiles
+
+#multiply ozone values by 1000 to convert to ppb
+all$Ozone = all$Ozone*1000
+```
+
+
+#remove rows with no ozone values (ozone values not reported past August 31, 2023, so will not be doing analysis for these times)
+```{r}
+all_clean = all %>% filter(!is.na(Ozone))
+write.csv(all_clean, file = "~/CO_CRA/CO_CRA/full_Rdata.csv")
+```
+
+
+## Calculating HIs with higher ozone RfCs ##
+
+
+#format data to calculate chronic HQs and HIs
+```{r}
+#filter RfCs for chronic
+chronic_rfcs = rfcs %>% filter(Exposure == "chronic")
+
+#fix chemical columns and their names, and filter for chemicals we're looking at
+all$Xylenes = all$o.Xylene + all$m..and.p.Xylene
+
+all_filtered = all %>% select(Sample.ID, Sampling.Site, Start.Date.Time, Stop.Date.Time, Phase, Mud, Benzene, Toluene, Ethylbenzene, Xylenes, n.Octane, n.Nonane, n.Decane, Ozone)
+
+chronic_rfcs$Chemical = gsub("n-octane", "n.Octane", chronic_rfcs$Chemical)
+chronic_rfcs$Chemical = gsub("n-nonane", "n.Nonane", chronic_rfcs$Chemical)
+chronic_rfcs$Chemical = gsub("n-decane", "n.Decane", chronic_rfcs$Chemical)
+```
+
+
+#calculate 95th percentile concentrations for sites/drilling/pre/prod for calculations
+```{r}
+percentiles_df <- all_filtered %>%
+  group_by(Sampling.Site, Phase, Mud) %>%
+  summarise_at(vars(Benzene, Ethylbenzene, Toluene, Xylenes, n.Octane, n.Nonane, n.Decane, Ozone), ~ quantile(., 0.95, na.rm = TRUE))
+
+#format percentiles_df to long to match up to chronic_rfcs column
+percentiles_long = percentiles_df %>%
+  pivot_longer(cols = c("Benzene", "Ethylbenzene", "Toluene", "Xylenes", "n.Octane", "n.Nonane", "n.Decane", "Ozone"), names_to = "Chemical", values_to = "Value")
+```
+
+
+#calculate chronic HQs (with lower ozone RfCs)and HIs for each endpoint group 
+```{r}
+#merge percentiles and rfc dataframes
+percentiles_rfcs = percentiles_long %>%
+  inner_join(chronic_rfcs, by = "Chemical")
+
+#calculate HQs
+percentiles_rfcs <- percentiles_rfcs %>%
+  mutate(HQ = Value / RfC)
+
+#calculate HIs for each site, drilling/pre/prod, for each endpoint
+detach(package:Rmisc)
+detach(package:plyr)
+
+chronic_HIs = percentiles_rfcs %>%
+  group_by(Sampling.Site, Phase, Mud, Endpoint) %>%
+  summarise(HI = sum(HQ)) 
+
+#save data
+write.csv(chronic_HIs, file = "~/CO_CRA/CO_CRA/Output/chronic_HIs_highO3.csv")
+```
+
+
+
+## Calculating HIs with lower ozone RfCs ##
+
+
+#format data to calculate chronic HQs and HIs
+```{r}
+#load new RfC csv
+rfcs = read.csv("~/CO_CRA/CO_CRA/Data/RfCs_ozoneUFs.csv")
+
+#filter RfCs for chronic
+chronic_rfcs = rfcs %>% filter(Exposure == "chronic")
+
+#fix chemical columns and their names, and filter for chemicals we're looking at
+all$Xylenes = all$o.Xylene + all$m..and.p.Xylene
+
+all_filtered = all %>% select(Sample.ID, Sampling.Site, Start.Date.Time, Stop.Date.Time, Phase, Mud, Benzene, Toluene, Ethylbenzene, Xylenes, n.Octane, n.Nonane, n.Decane, Ozone)
+
+chronic_rfcs$Chemical = gsub("n-octane", "n.Octane", chronic_rfcs$Chemical)
+chronic_rfcs$Chemical = gsub("n-nonane", "n.Nonane", chronic_rfcs$Chemical)
+chronic_rfcs$Chemical = gsub("n-decane", "n.Decane", chronic_rfcs$Chemical)
+```
+
+
+#calculate 95th percentile concentrations for sites/drilling/pre/prod for calculations
+```{r}
+percentiles_df <- all_filtered %>%
+  group_by(Sampling.Site, Phase, Mud) %>%
+  summarise_at(vars(Benzene, Ethylbenzene, Toluene, Xylenes, n.Octane, n.Nonane, n.Decane, Ozone), ~ quantile(., 0.95, na.rm = TRUE))
+
+#format percentiles_df to long to match up to chronic_rfcs column
+percentiles_long = percentiles_df %>%
+  pivot_longer(cols = c("Benzene", "Ethylbenzene", "Toluene", "Xylenes", "n.Octane", "n.Nonane", "n.Decane", "Ozone"), names_to = "Chemical", values_to = "Value")
+```
+
+
+#calculate chronic HQs (with lower ozone RfCs)and HIs for each endpoint group 
+```{r}
+#merge percentiles and rfc dataframes
+percentiles_rfcs = percentiles_long %>%
+  inner_join(chronic_rfcs, by = "Chemical")
+
+#calculate HQs
+percentiles_rfcs <- percentiles_rfcs %>%
+  mutate(HQ = Value / RfC)
+
+#calculate HIs for each site, drilling/pre/prod, for each endpoint
+
+chronic_HIs = percentiles_rfcs %>%
+  group_by(Sampling.Site, Phase, Mud, Endpoint) %>%
+  summarise(HI = sum(HQ)) 
+
+#save data
+write.csv(chronic_HIs, file = "~/CO_CRA/CO_CRA/Output/chronic_HIs_lowO3.csv")
+```
+
+
+#statistics (ran this also for high O3 RfCs and found no statistical differences)
+```{r}
+#ANOVA to see significant differences between sampling site and phase
+chronic_aov_lowO3 = aov(HI ~ Sampling.Site*Phase, data = chronic_HIs)
+summary(chronic_aov_lowO3)
+
+#check assumptions: normality of residuals (p < 0.05 so the residuals are not normally distributed; will need to log-transform data)
+residuals = residuals(chronic_aov_lowO3)
+shapiro.test(residuals)
+
+#check assumptions: homogeneity of variances (using Levene's test because it is less sensitive to departures from normality, which we have here; if residuals were normally distributed, could use Bartlett's test); here, have homogeneity of variances (p > 0.05)
+
+leveneTest(HI ~ Sampling.Site*Phase, data = chronic_HIs)
+
+#log-transform HIs for normality
+chronic_HIs$log_HI = log(chronic_HIs$HI)
+
+#re-run ANOVA
+chronic_aov_lowO3 = aov(log_HI ~ Sampling.Site*Phase, data = chronic_HIs)
+summary(chronic_aov_lowO3)
+
+#re-test for normality (still not normal, so going to use Kruskal-Wallis test instead of ANOVA)
+residuals = residuals(chronic_aov_lowO3)
+shapiro.test(residuals)
+
+#Kruskal-Wallis test
+chronic_kw_lowO3 = kruskal.test(HI ~ Sampling.Site, data = chronic_HIs)
+print(chronic_kw_lowO3) # p = 0.9344
+
+chronic_kw_lowO3 = kruskal.test(HI ~ Phase, data = chronic_HIs)
+print(chronic_kw_lowO3) # p = 0.008005
+
+chronic_kw_lowO3 = kruskal.test(HI ~ Mud, data = chronic_HIs)
+print(chronic_kw_lowO3) # p = 0.6008
+
+#Dunn test (post-hoc equivalent to Tukey) to see differences between phases: significant difference between drilling and production (adjusted p = 0.002839818)
+chronic_dunn_lowO3 = dunn.test(chronic_HIs$HI, g = chronic_HIs$Phase, method = "bonferroni")
+print(chronic_dunn_lowO3)
+
+#Dunn test for sites just to make sure
+chronic_dunn_highO3 = dunn.test(chronic_HIs$HI, g = chronic_HIs$Sampling.Site, method = "bonferroni")
+print(chronic_dunn_lowO3)
+
+```
+
+
+## Calculating VOC-only HIs ##
+
+#format data to calculate chronic HQs and HIs
+```{r}
+#load new RfC csv
+rfcs = read.csv("~/CO_CRA/CO_CRA/Data/RfCs_ozoneUFs.csv")
+
+#filter RfCs for chronic
+chronic_rfcs = rfcs %>% filter(Exposure == "chronic")
+
+#fix chemical columns and their names, and filter for chemicals we're looking at (no ozone)
+all$Xylenes = all$o.Xylene + all$m..and.p.Xylene
+
+all_filtered = all %>% select(Sample.ID, Sampling.Site, Start.Date.Time, Stop.Date.Time, Phase, Mud, Benzene, Toluene, Ethylbenzene, Xylenes, n.Octane, n.Nonane, n.Decane)
+
+chronic_rfcs$Chemical = gsub("n-octane", "n.Octane", chronic_rfcs$Chemical)
+chronic_rfcs$Chemical = gsub("n-nonane", "n.Nonane", chronic_rfcs$Chemical)
+chronic_rfcs$Chemical = gsub("n-decane", "n.Decane", chronic_rfcs$Chemical)
+```
+
+
+#calculate 95th percentile concentrations for sites/drilling/pre/prod for calculations
+```{r}
+percentiles_df <- all_filtered %>%
+  group_by(Sampling.Site, Phase, Mud) %>%
+  summarise_at(vars(Benzene, Ethylbenzene, Toluene, Xylenes, n.Octane, n.Nonane, n.Decane), ~ quantile(., 0.95, na.rm = TRUE))
+
+#format percentiles_df to long to match up to chronic_rfcs column
+percentiles_long = percentiles_df %>%
+  pivot_longer(cols = c("Benzene", "Ethylbenzene", "Toluene", "Xylenes", "n.Octane", "n.Nonane", "n.Decane"), names_to = "Chemical", values_to = "Value")
+```
+
+
+#calculate chronic HQs (with lower ozone RfCs)and HIs for each endpoint group 
+```{r}
+#merge percentiles and rfc dataframes
+percentiles_rfcs = percentiles_long %>%
+  inner_join(chronic_rfcs, by = "Chemical")
+
+#calculate HQs
+percentiles_rfcs <- percentiles_rfcs %>%
+  mutate(HQ = Value / RfC)
+
+#calculate HIs for each site, drilling/pre/prod, for each endpoint
+
+chronic_HIs = percentiles_rfcs %>%
+  group_by(Sampling.Site, Phase, Mud, Endpoint) %>%
+  summarise(HI = sum(HQ)) 
+
+#save data
+write.csv(chronic_HIs, file = "~/CO_CRA/CO_CRA/Output/chronic_HIs_VOConly.csv")
+```
+
+
+## Calculate cancer risks ##
+
+```{r}
+#format percentiles_df to long to match up to iurs columns just for Benzenea and EB
+percentiles_long_iurs = percentiles_df %>%
+  select(Sampling.Site, Phase, Mud, Benzene, Ethylbenzene) %>%
+  pivot_longer(cols = c("Benzene", "Ethylbenzene"), names_to = "Chemical", values_to = "Value") 
+
+#merge percentiles and iur dataframes
+percentiles_iurs = percentiles_long_iurs %>%
+  inner_join(iurs, by = "Chemical")
+
+#calculate HQs 
+percentiles_iurs <- percentiles_iurs %>%
+  mutate(Ind_Risk = Value * IUR..ppb.)
+
+#calculate HIs for each site, drilling/pre/prod, for each endpoint 
+
+chronic_cancer = percentiles_iurs %>%
+  group_by(Sampling.Site, Phase, Mud) %>%
+  summarise(Total_Cancer_Risk = sum(Ind_Risk)) 
+
+#save data 
+write.csv(percentiles_iurs, file = "~/CO_CRA/CO_CRA/Output/cancer_individual.csv")
+write.csv(chronic_cancer, file = "~/CO_CRA/CO_CRA/Output/cancer_cumulative.csv")
+```
+
+
+
+### Calculating combined HIs from multiple pads ###
+
+
+#format data to add to shapefile
+
+```{r}
+chronic_HIs_forshape = chronic_HIs %>%
+  filter(Sampling.Site == "Interchange A" | Sampling.Site == "Interchange B" | Sampling.Site == "Livingston" | Sampling.Site == "Northwest A" | Sampling.Site == "Northwest B" | Sampling.Site == "United") %>%
+  select(Sampling.Site, Phase, Mud, Endpoint, HI)
+
+#calculate 5th, 50th, and 95th percentile for each site for each endpoint to look at best, medium, and worst case scenarios for cumulative exposure
+chronic_HIs_forshape_perc = chronic_HIs_forshape %>%
+  group_by(Sampling.Site, Endpoint) %>%
+  summarise(
+    min = min(HI, na.rm = TRUE),
+    p05 = quantile(HI, 0.05, na.rm = TRUE),
+    p50 = quantile(HI, 0.50, na.rm = TRUE),
+    p95 = quantile(HI, 0.95, na.rm = TRUE),
+    max = max(HI, na.rm = TRUE)
+  )
+
+#separate into endpoints to calculate and view combined HIs from multiple pads in ArcGIS
+split_dataframes <- split(chronic_HIs_forshape_perc, chronic_HIs_forshape_perc$Endpoint)
+
+for(endpoint in names(split_dataframes)) {
+  assign(paste0("df_", endpoint), split_dataframes[[endpoint]])
+}
+
+#save files
+write.csv(df_cardiovascular, file = "~/CO_CRA/CO_CRA/Output/chronic_cardiovascular.csv")
+write.csv(df_developmental, file = "~/CO_CRA/CO_CRA/Output/chronic_developmental.csv")
+write.csv(df_gastrointestinal, file = "~/CO_CRA/CO_CRA/Output/chronic_gastrointestinal.csv")
+write.csv(df_hematological, file = "~/CO_CRA/CO_CRA/Output/chronic_hematological.csv")
+write.csv(df_hepatic, file = "~/CO_CRA/CO_CRA/Output/chronic_hepatic.csv")
+write.csv(df_immunological, file = "~/CO_CRA/CO_CRA/Output/chronic_immunological.csv")
+write.csv(df_neurological, file = "~/CO_CRA/CO_CRA/Output/chronic_neurological.csv")
+write.csv(df_ocular, file = "~/CO_CRA/CO_CRA/Output/chronic_ocular.csv")
+write.csv(df_renal, file = "~/CO_CRA/CO_CRA/Output/chronic_renal.csv")
+write.csv(df_reproductive, file = "~/CO_CRA/CO_CRA/Output/chronic_reproductive.csv")
+write.csv(df_respiratory, file = "~/CO_CRA/CO_CRA/Output/chronic_respiratory.csv")
+
+```
+
+
+#calculate cumulative HIs with overlapping 1 mile buffers (have some code here to try to do this in R instead of ArcGIS but it's not working because I can't get the joined_data to be of class shapefile; easier for me to do in Arc so doing that)
+```{r}
+polygons = st_read("~/CO_CRA/CO_Mapping/1mile_buffers.shp")
+
+#reproject polygons to ensure spatial operations are accurate
+polygons <- st_transform(polygons, crs = st_crs(shp))
+
+#join data
+joined_data = chronic_HIs_forshape_perc %>%
+  left_join(polygons, by = c("Sampling.Site" = "FACILITY_N"))
+
+#perform spatial join and aggregation of data in overlapping polygons
+joined <- st_as_sf(joined_data)
+
+joined_shape = st_write(joined_data, "joined_data.csv")
+joined_shape = st_read("joined_data.csv") %>%
+  st_set_crs(st_crs(4326))
+
+buffers_HIs_combined <- joined %>%
+  st_join(joined_data, polygons, join = st_intersects) %>%
+  group_by(Sampling.Site) %>%
+  summarise(
+    sum_min = sum(min, na.rm = TRUE),
+    sum_p05 = sum(p05, na.rm = TRUE),
+    sum_p50 = sum(p50, na.rm = TRUE),
+    sum_p95 = sum(p95, na.rm = TRUE),
+    sum_max = sum(max, na.rm = TRUE)
+  )
+
+class(joined_data)
+class(polygons)
+
+```
+
+
+
+
