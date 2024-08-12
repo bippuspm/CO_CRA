@@ -1,0 +1,183 @@
+---
+title: "Acute HI calculations for 95th percentile values"
+author: "Paige Varner"
+date: "2024-06-10"
+output: html_document
+---
+
+
+#load libraries and data
+```{r}
+library("dplyr")
+library("bigrquery")
+library("DBI")
+library("pheatmap")
+library("RColorBrewer")
+library("Rmisc")
+library("stats")
+library("rstatix")
+library("ggplot2")
+library("tidyr")
+library("car")
+library("janitor")
+library("dunn.test")
+library("sf")
+library("lubridate")
+library("stringr")
+
+ozone = read.csv("~/CO_CRA/CO_CRA/Data/ozone_hourly_2018-2023.csv")
+vocs = read.csv("~/CO_CRA/CO_CRA/Data/hourly_VOCs.csv")
+rfcs = read.csv("~/CO_CRA/CO_CRA/Data/RfCs.csv")
+```
+
+
+
+#calculate 95th percentile of ozone mean within specified dates/times
+```{r}
+#convert date columns to date class
+vocs$Date <- as.Date(vocs$Date)
+ozone$Date.Local <- as.Date(ozone$Date.Local)
+
+# Extract the hour from the Time columns
+vocs <- vocs %>%
+  mutate(Hour = format(as.POSIXct(Time, format = "%H:%M"), "%H"))
+
+ozone <- ozone %>%
+  mutate(Hour = format(as.POSIXct(Time.Local, format = "%H:%M"), "%H"))
+
+# Merge the dataframes on Date and Hour
+merged_df <- vocs %>%
+  left_join(ozone, by = c("Date" = "Date.Local", "Hour"))
+
+# Calculate the 95th percentile of Sample.Measurement for each Date and Hour
+detach(package:Rmisc)
+detach(package:plyr)
+
+percentiles_df <- merged_df %>%
+  group_by(Sampling.Site, Phase, Date, Hour) %>%
+  summarise(ozone = quantile(Sample.Measurement, 0.95, na.rm = TRUE))
+
+#multiply ozone values by 1000 to convert to ppb
+percentiles_df$ozone = percentiles_df$ozone*1000
+
+#merge results as new column in new dataframe
+all_clean = vocs %>%
+  left_join(percentiles_df, by = c("Sampling.Site", "Phase", "Date", "Hour"))
+
+```
+
+
+## Calculating HIs including ozone ##
+
+
+#format data to calculate chronic HQs and HIs
+```{r}
+#filter RfCs for acute
+acute_rfcs = rfcs %>% filter(Exposure == "acute")
+
+#fix chemical columns and their names, and filter for chemicals we're looking at
+all_clean$Xylenes = all_clean$o.Xylene + all_clean$m..and.p.Xylene
+
+acute_rfcs$Chemical = gsub("n-octane", "n.Octane", acute_rfcs$Chemical)
+acute_rfcs$Chemical = gsub("n-nonane", "n.Nonane", acute_rfcs$Chemical)
+acute_rfcs$Chemical = gsub("n-decane", "n.Decane", acute_rfcs$Chemical)
+acute_rfcs$Chemical = gsub("Trichloroethylene", "C2HCl3", acute_rfcs$Chemical)
+acute_rfcs$Chemical = gsub("Tetrachloroethylene", "C2Cl4", acute_rfcs$Chemical)
+
+colnames(all_clean)[colnames(all_clean) == "ozone"] = "Ozone"
+
+#add chemical concentrations together for aliphatic low and aromatic medium groups
+all_clean$Aliphatic_low = NA
+
+all_clean$Aliphatic_low = all_clean$n.Octane + all_clean$i.Pentane + all_clean$n.Pentane + all_clean$trans_2.Pentene + all_clean$X1.Pentene + all_clean$cis.2.Pentene + all_clean$n.Hexane + all_clean$Isoprene + all_clean$X2.4.Dimethylpentane + all_clean$n.Heptane + all_clean$Cyclohexane + all_clean$X2.3.Dimethylpentane + all_clean$X2.Methylhexane + all_clean$X3.Methylhexane + all_clean$X2.2.4.Trimethylpentane + all_clean$Methylcyclohexane + all_clean$X2.3.4.Trimethylpentane + all_clean$X2.Methylheptane + all_clean$X3.Methylheptane + all_clean$Cyclopentane
+
+all_clean$Aromatic_medium = all_clean$i.Propylbenzene + all_clean$n.Propylbenzene + all_clean$X3.Ethyltoluene + all_clean$X4.Ethyltoluene + all_clean$X1.3.5.Trimethylbenzene + all_clean$X2.Ethyltoluene + all_clean$X1.2.4.Trimethylbenzene + all_clean$X1.2.3.Trimethylbenzene + all_clean$X1.3.Diethylbenzene + all_clean$X1.4.Diethylbenzene
+
+```
+
+
+
+#calculate 95th percentile concentrations for sites/phase
+
+```{r}
+percentiles_df <- all_clean %>%
+  group_by(Sampling.Site, Phase) %>%
+  summarise_at(vars(Benzene, Ethylbenzene, Toluene, Xylenes, n.Octane, n.Nonane, n.Decane, Ozone, Aliphatic_low, Aromatic_medium, Styrene, C2HCl3, C2Cl4, Propene), ~ quantile(., 0.95, na.rm = TRUE))
+
+#format twa_df to long to match up to acute_rfcs column
+perc_long = percentiles_df %>%
+  pivot_longer(cols = c("Benzene", "Ethylbenzene", "Toluene", "Xylenes", "n.Octane", "n.Nonane", "n.Decane", "Ozone", "Aliphatic_low", "Aromatic_medium", "Styrene", "C2HCl3", "C2Cl4", "Propene"), names_to = "Chemical", values_to = "Value")
+
+```
+
+
+
+#calculate acute HQs and HIs for each endpoint group 
+
+```{r}
+#merge perc_long and rfc dataframes
+perc_rfcs = perc_long %>%
+  inner_join(acute_rfcs, by = "Chemical")
+
+#calculate HQs
+perc_rfcs <- perc_rfcs %>%
+  mutate(HQ = Value / RfC)
+
+#calculate HIs for each site, drilling/pre/prod, for each endpoint
+
+acute_HIs = perc_rfcs %>%
+  group_by(Sampling.Site, Phase, Endpoint) %>%
+  summarise(HI = sum(HQ)) 
+
+#save data
+write.csv(acute_HIs, file = "~/CO_CRA/CO_CRA/Output/acute_HIs_95.csv")
+write.csv(perc_rfcs, file = "~/CO_CRA/CO_CRA/Output/acute_HQs_95.csv")
+
+```
+
+
+## Calculating VOC-only HIs and ozone-only HQs for use in combining via site ##
+
+#format data to include concentrations for only VOCs
+```{r}
+perc_vocs = percentiles_df %>%
+  select(-Ozone)
+
+#format to long to match up to chronic_rfcs column
+perc_vocs_long = perc_vocs %>%
+  pivot_longer(cols = c("Benzene", "Ethylbenzene", "Toluene", "Xylenes", "n.Octane", "n.Nonane", "n.Decane", "Aliphatic_low", "Aromatic_medium", "Styrene", "C2HCl3", "C2Cl4", "Propene"), names_to = "Chemical", values_to = "Value")
+
+```
+
+
+#calculate chronic HQs and HIs for each endpoint group 
+```{r}
+#merge perc and rfc dataframes
+perc_rfcs_vocs = perc_vocs_long %>%
+  inner_join(acute_rfcs, by = "Chemical")
+
+#calculate HQs
+perc_rfcs_vocs <- perc_rfcs_vocs %>%
+  mutate(HQ = Value / RfC)
+
+#calculate HIs for each site, drilling/pre/prod, for each endpoint
+
+acute_HIs_VOCs = perc_rfcs_vocs %>%
+  group_by(Sampling.Site, Phase, Endpoint) %>%
+  summarise(HI = sum(HQ)) 
+
+#save data
+write.csv(acute_HIs_VOCs, file = "~/CO_CRA/CO_CRA/Output/acute_HIs_VOCs_95.csv")
+```
+
+
+#Save ozone-only HQs per site to add after VOC-only HIs are merged in ArcGIS by Meagan
+```{r}
+ozone_HQs = perc_rfcs %>%
+  filter(Chemical == "Ozone") %>%
+  select(-RfC)
+
+write.csv(ozone_HQs, file = "~/CO_CRA/CO_CRA/Output/acute_ozone_HQs_95.csv")
+```
+
+

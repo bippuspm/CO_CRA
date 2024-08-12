@@ -1,0 +1,328 @@
+---
+title: "Chronic hazard values - Graphing and Visualization"
+author: "Paige Varner"
+date: "2024-06-11"
+output: html_document
+---
+
+
+#load libraries and data 
+```{r}
+library("dplyr")
+library("RColorBrewer")
+library("Rmisc")
+library("stats")
+library("rstatix")
+library("ggplot2")
+library("tidyr")
+detach(package:Rmisc)
+detach(package:plyr)
+
+HQ50 = read.csv("~/CO_CRA/CO_CRA/Output/chronic_TWA_HQs_50.csv")
+HQ95 = read.csv("~/CO_CRA/CO_CRA/Output/chronic_TWA_HQs_95.csv")
+HI50 = read.csv("~/CO_CRA/CO_CRA/Output/chronic_TWA_HIs_50.csv")
+HI95 = read.csv("~/CO_CRA/CO_CRA/Output/chronic_TWA_HIs_95.csv")
+
+HI50_VOCs = read.csv("~/CO_CRA/CO_CRA/Output/chronic_TWA_HIs_VOCs_50.csv")
+HI95_VOCs = read.csv("~/CO_CRA/CO_CRA/Output/chronic_TWA_HIs_VOCs_95.csv")
+
+HQ50$Chemical[HQ50$Chemical == "C2Cl4"] = "PCE"
+HQ50$Chemical[HQ50$Chemical == "C2HCl3"] = "TCE"
+HQ95$Chemical[HQ95$Chemical == "C2Cl4"] = "PCE"
+HQ95$Chemical[HQ95$Chemical == "C2HCl3"] = "TCE"
+```
+
+
+#heatmap of chronic HIs by site and endpoint (for VOCs-only and for 50 and 95)
+```{r}
+#50th percentile values
+
+HI50_VOCs <- HI50_VOCs %>%
+  mutate(Sampling.Site = case_when(
+    Sampling.Site == "Commons" ~ "Background",
+    TRUE ~ as.character(Sampling.Site) 
+  ))
+
+#get Highlight column to create box in heatmap, then create map
+HI50_VOCs <- HI50_VOCs %>%
+  mutate(Highlight = HI > 1)
+
+HI50_VOCs$Sampling.Site <- factor(HI50_VOCs$Sampling.Site)
+HI50_VOCs$Endpoint <- factor(HI50_VOCs$Endpoint)
+
+heat_HI50_VOCs = ggplot(HI50_VOCs, aes(x = Sampling.Site, y = Endpoint, fill = HI)) +
+  geom_tile(aes(fill = HI)) +
+  geom_rect(data = HI50_VOCs %>% filter(Highlight), 
+            aes(xmin = as.numeric(Sampling.Site) - 0.5, 
+                xmax = as.numeric(Sampling.Site) + 0.5, 
+                ymin = as.numeric(Endpoint) - 0.5, 
+                ymax = as.numeric(Endpoint) + 0.5), 
+            fill = NA, color = "black", size = 1) +
+  geom_tile(color = "black", fill = NA, size = 0.2) +
+  scale_fill_gradientn(colors = brewer.pal(9, "YlGnBu")) +
+  theme_bw() +
+  labs(title = "Chronic Hazard Indices - VOCs only (Median Chemical Conc.)",
+       x = "Site",
+       y = "Endpoint",
+       fill = "HI") +
+    theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 14),
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 16),
+        plot.title = element_text(size = 18))
+
+
+heat_HI50_VOCs
+
+ggsave(filename = "heat_chronicHI50_VOCs.png", device = "png", plot = heat_HI50_VOCs, path = "~/CO_CRA/CO_CRA/Output/", width = 10, height = 10)
+
+#95th percentile values
+
+HI95_VOCs <- HI95_VOCs %>%
+  mutate(Sampling.Site = case_when(
+    Sampling.Site == "Commons" ~ "Background",
+    TRUE ~ as.character(Sampling.Site) 
+  ))
+
+#get Highlight column to create box in heatmap, then create map
+HI95_VOCs <- HI95_VOCs %>%
+  mutate(Highlight = HI > 1)
+
+HI95_VOCs$Sampling.Site <- factor(HI95_VOCs$Sampling.Site)
+HI95_VOCs$Endpoint <- factor(HI95_VOCs$Endpoint)
+
+heat_HI95_VOCs = ggplot(HI95_VOCs, aes(x = Sampling.Site, y = Endpoint, fill = HI)) +
+  geom_tile(aes(fill = HI)) +
+  geom_rect(data = HI95_VOCs %>% filter(Highlight), 
+            aes(xmin = as.numeric(Sampling.Site) - 0.5, 
+                xmax = as.numeric(Sampling.Site) + 0.5, 
+                ymin = as.numeric(Endpoint) - 0.5, 
+                ymax = as.numeric(Endpoint) + 0.5), 
+            fill = NA, color = "black", size = 1) +
+  geom_tile(color = "black", fill = NA, size = 0.2) +
+  scale_fill_gradientn(colors = brewer.pal(9, "YlGnBu")) +
+  theme_bw() +
+  labs(title = "Chronic Hazard Indices - VOCs only (95th Perc. Chemical Conc.)",
+       x = "Site",
+       y = "Endpoint",
+       fill = "HI") +
+    theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 14),
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 16),
+        plot.title = element_text(size = 18))
+
+
+heat_HI95_VOCs
+
+ggsave(filename = "heat_chronicHI95_VOCs.png", device = "png", plot = heat_HI95_VOCs, path = "~/CO_CRA/CO_CRA/Output/", width = 10, height = 10)
+
+```
+
+
+#heatmap of chronic HIs by site and endpoint (with ozone for 50 and 95)
+```{r}
+#50th percentile values
+
+HI50 <- HI50 %>%
+  mutate(Sampling.Site = case_when(
+    Sampling.Site == "Commons" ~ "Background",
+    TRUE ~ as.character(Sampling.Site)  
+  ))
+
+#get Highlight column to create box in heatmap, then create map
+HI50 <- HI50 %>%
+  mutate(Highlight = HI > 1)
+
+HI50$Sampling.Site <- factor(HI50$Sampling.Site)
+HI50$Endpoint <- factor(HI50$Endpoint)
+
+heat_HI50 = ggplot(HI50, aes(x = Sampling.Site, y = Endpoint, fill = HI)) +
+  geom_tile(aes(fill = HI)) +
+  geom_rect(data = HI50 %>% filter(Highlight), 
+            aes(xmin = as.numeric(Sampling.Site) - 0.5, 
+                xmax = as.numeric(Sampling.Site) + 0.5, 
+                ymin = as.numeric(Endpoint) - 0.5, 
+                ymax = as.numeric(Endpoint) + 0.5), 
+            fill = NA, color = "black", size = 1) +
+  geom_tile(color = "black", fill = NA, size = 0.2) +
+  scale_fill_gradientn(colors = brewer.pal(9, "YlGnBu")) +
+  theme_bw() +
+  labs(title = "Chronic Hazard Indices (Median Chemical Conc.)",
+       x = "Site",
+       y = "Endpoint",
+       fill = "HI") +
+    theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 14),
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 16),
+        plot.title = element_text(size = 18))
+
+
+heat_HI50
+
+ggsave(filename = "heat_chronicHI50.png", device = "png", plot = heat_HI50, path = "~/CO_CRA/CO_CRA/Output/", width = 10, height = 10)
+
+#95th percentile values
+
+HI95 <- HI95 %>%
+  mutate(Sampling.Site = case_when(
+    Sampling.Site == "Commons" ~ "Background",
+    TRUE ~ as.character(Sampling.Site) 
+  ))
+
+#get Highlight column to create box in heatmap, then create map
+HI95 <- HI95 %>%
+  mutate(Highlight = HI > 1)
+
+HI95$Sampling.Site <- factor(HI95$Sampling.Site)
+HI95$Endpoint <- factor(HI95$Endpoint)
+
+heat_HI95 = ggplot(HI95, aes(x = Sampling.Site, y = Endpoint, fill = HI)) +
+  geom_tile(aes(fill = HI)) +
+  geom_rect(data = HI95 %>% filter(Highlight), 
+            aes(xmin = as.numeric(Sampling.Site) - 0.5, 
+                xmax = as.numeric(Sampling.Site) + 0.5, 
+                ymin = as.numeric(Endpoint) - 0.5, 
+                ymax = as.numeric(Endpoint) + 0.5), 
+            fill = NA, color = "black", size = 1) +
+  geom_tile(color = "black", fill = NA, size = 0.2) +
+  scale_fill_gradientn(colors = brewer.pal(9, "YlGnBu")) +
+  theme_bw() +
+  labs(title = "Chronic Hazard Indices (95th Perc. Chemical Conc.)",
+       x = "Site",
+       y = "Endpoint",
+       fill = "HI") +
+    theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 14),
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 16),
+        plot.title = element_text(size = 18))
+
+
+heat_HI95
+
+ggsave(filename = "heat_chronicHI95.png", device = "png", plot = heat_HI95, path = "~/CO_CRA/CO_CRA/Output/", width = 10, height = 10)
+
+```
+
+
+
+### cancer risk visualization ###
+
+#load data
+```{r}
+cancer50 = read.csv("~/CO_CRA/CO_CRA/Output/cancer_individual_50.csv")
+cancer95 = read.csv("~/CO_CRA/CO_CRA/Output/cancer_individual_95.csv")
+```
+
+
+#stacked bar of cancer risk by site - 50th percentile
+```{r}
+cancer50 <- cancer50 %>%
+  mutate(Sampling.Site = case_when(
+    Sampling.Site == "Commons" ~ "Background",
+    TRUE ~ as.character(Sampling.Site)  
+  ))
+
+cancer50$Sampling.Site = factor(cancer50$Sampling.Site, levels = c("Anthem", "Wildgrass", "Interchange B", "Livingston", "Northwest A", "Northwest B", "United", "Background"))
+
+#remove ICA
+cancer50 <- cancer50 %>%
+  filter(Sampling.Site != "Interchange A")
+
+# Assign colors from the chosen palette to Chemical categories
+palette_colors = brewer.pal(n = nlevels(as.factor(cancer50$Chemical)), name = "YlGnBu")
+
+# Create a named vector of colors for each Chemical
+chemical_colors = setNames(palette_colors, levels(factor(cancer50$Chemical)))
+
+#make stacked bar plot 
+bar_cancer50 = ggplot(cancer50, aes(x = Sampling.Site, y = Ind_Risk, fill = Chemical)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = chemical_colors) + 
+  theme_bw() +
+  scale_y_continuous(labels = scales::scientific) +
+  labs(title = "Cancer Risk - Median Chemical Conc.", 
+       x = "Site", 
+       y = "Cancer Risk", 
+       fill = "Chemical") +
+  geom_hline(yintercept = 0.0001, linetype = "dashed") +
+  geom_hline(yintercept = 0.000001, linetype = "dashed") +
+  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 14),
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 16),
+        plot.title = element_text(size = 18))
+
+bar_cancer50
+
+ggsave(filename = "bar_cancer50.png", device = "png", plot = bar_cancer50, path = "~/CO_CRA/CO_CRA/Output/", width = 10, height = 10)
+```
+
+
+#stacked bar of cancer risk by site - 95th percentile
+```{r}
+cancer95 <- cancer95 %>%
+  mutate(Sampling.Site = case_when(
+    Sampling.Site == "Commons" ~ "Background",
+    TRUE ~ as.character(Sampling.Site)  
+  ))
+
+cancer95$Sampling.Site = factor(cancer95$Sampling.Site, levels = c("Anthem", "Wildgrass", "Interchange B", "Livingston", "Northwest A", "Northwest B", "United", "Background"))
+
+#remove ICA
+cancer95 <- cancer95 %>%
+  filter(Sampling.Site != "Interchange A")
+
+# Assign colors from the chosen palette to Chemical categories
+palette_colors = brewer.pal(n = nlevels(as.factor(cancer95$Chemical)), name = "YlGnBu")
+
+# Create a named vector of colors for each Chemical
+chemical_colors = setNames(palette_colors, levels(factor(cancer95$Chemical)))
+
+#make stacked bar plot 
+bar_cancer95 = ggplot(cancer95, aes(x = Sampling.Site, y = Ind_Risk, fill = Chemical)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = chemical_colors) + 
+  theme_bw() +
+  scale_y_continuous(labels = scales::scientific) +
+  labs(title = "Cancer Risk - 95th Perc. Chemical Conc.", 
+       x = "Site", 
+       y = "Cancer Risk", 
+       fill = "Chemical") +
+  geom_hline(yintercept = 0.0001, linetype = "dashed") +
+  geom_hline(yintercept = 0.000001, linetype = "dashed") +
+  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 14),
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 16),
+        plot.title = element_text(size = 18))
+
+bar_cancer95
+
+ggsave(filename = "bar_cancer95.png", device = "png", plot = bar_cancer95, path = "~/CO_CRA/CO_CRA/Output/", width = 10, height = 10)
+```
+
+
+
+
+
+
+
+
+
+
+

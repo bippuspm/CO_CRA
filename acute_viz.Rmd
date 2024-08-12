@@ -1,0 +1,683 @@
+---
+title: "Acute hazard values - Graphing and visualization"
+author: "Paige Varner"
+date: "2024-06-12"
+output: html_document
+---
+
+#load libraries and data 
+```{r}
+library("dplyr")
+library("RColorBrewer")
+library("Rmisc")
+library("stats")
+library("rstatix")
+library("ggplot2")
+library("tidyr")
+library("RColorBrewer")
+detach(package:Rmisc)
+detach(package:plyr)
+
+HQ50 = read.csv("~/CO_CRA/CO_CRA/Output/acute_HQs_50.csv")
+HQ95 = read.csv("~/CO_CRA/CO_CRA/Output/acute_HQs_95.csv")
+HI50 = read.csv("~/CO_CRA/CO_CRA/Output/acute_HIs_50.csv")
+HI95 = read.csv("~/CO_CRA/CO_CRA/Output/acute_HIs_95.csv")
+
+HQ50$Chemical[HQ50$Chemical == "C2Cl4"] = "PCE"
+HQ50$Chemical[HQ50$Chemical == "C2HCl3"] = "TCE"
+HQ95$Chemical[HQ95$Chemical == "C2Cl4"] = "PCE"
+HQ95$Chemical[HQ95$Chemical == "C2HCl3"] = "TCE"
+```
+
+
+### heat maps by site ###
+
+
+#heatmap of acute HIs by site and endpoint - 50th percentile values
+```{r}
+#get the average HI (either from drilling, pre, or prod) for each site
+HI50_clean = HI50 %>%
+  group_by(Sampling.Site, Endpoint) %>%
+  summarize(average_HI = mean(HI, na.rm = TRUE)) %>%
+  ungroup()
+
+#get Highlight column to create box in heatmap
+HI50_clean = HI50_clean %>%
+  mutate(Highlight = average_HI > 1)
+
+HI50_clean$Sampling.Site <- factor(HI50_clean$Sampling.Site)
+HI50_clean$Endpoint <- factor(HI50_clean$Endpoint)
+
+#graph and save
+heat_HI50 = ggplot(HI50_clean, aes(x = Sampling.Site, y = Endpoint, fill = average_HI)) +
+  geom_tile(aes(fill = average_HI)) +
+  geom_rect(data = HI50_clean %>% filter(Highlight), 
+            aes(xmin = as.numeric(Sampling.Site) - 0.5, 
+                xmax = as.numeric(Sampling.Site) + 0.5, 
+                ymin = as.numeric(Endpoint) - 0.5, 
+                ymax = as.numeric(Endpoint) + 0.5), 
+            fill = NA, color = "black", size = 1) +
+  geom_tile(color = "black", fill = NA, size = 0.2) +
+  scale_fill_gradientn(colors = brewer.pal(9, "YlGnBu")) +
+  theme_bw() +
+  labs(title = "Acute Hazard Indices (Median Chemical Conc.)",
+       x = "Site",
+       y = "Endpoint",
+       fill = "Average HI") +
+  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 14),
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 16),
+        plot.title = element_text(size = 18))
+
+heat_HI50
+
+ggsave(filename = "heat_acuteHI50_site.png", device = "png", plot = heat_HI50, path = "~/CO_CRA/CO_CRA/Output/", width = 10, height = 10)
+```
+
+
+#heatmap of acute HIs by site and endpoint - 95th percentile values
+```{r}
+#get the average HI (either from drilling, pre, or prod) for each site
+HI95_clean = HI95 %>%
+  group_by(Sampling.Site, Endpoint) %>%
+  summarize(average_HI = mean(HI, na.rm = TRUE)) %>%
+  ungroup()
+
+#get Highlight column to create box in heatmap
+HI95_clean <- HI95_clean %>%
+  mutate(Highlight = average_HI > 1)
+
+HI95_clean$Sampling.Site <- factor(HI95_clean$Sampling.Site)
+HI95_clean$Endpoint <- factor(HI95_clean$Endpoint)
+
+heat_HI95 = ggplot(HI95_clean, aes(x = Sampling.Site, y = Endpoint, fill = average_HI)) +
+  geom_tile(aes(fill = average_HI)) +
+  geom_rect(data = HI95_clean %>% filter(Highlight), 
+            aes(xmin = as.numeric(Sampling.Site) - 0.5, 
+                xmax = as.numeric(Sampling.Site) + 0.5, 
+                ymin = as.numeric(Endpoint) - 0.5, 
+                ymax = as.numeric(Endpoint) + 0.5), 
+            fill = NA, color = "black", size = 1) +
+  geom_tile(color = "black", fill = NA, size = 0.2) +
+  scale_fill_gradientn(colors = brewer.pal(9, "YlGnBu")) +
+  theme_bw() +
+  labs(title = "Acute Hazard Indices (95th Perc. Chemical Concentrations)",
+       x = "Site",
+       y = "Endpoint",
+       fill = "Avgerage HI") +
+    theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 14),
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 16),
+        plot.title = element_text(size = 18))
+
+heat_HI95
+
+ggsave(filename = "heat_acuteHI95_site.png", device = "png", plot = heat_HI95, path = "~/CO_CRA/CO_CRA/Output/", width = 10, height = 10)
+
+```
+
+
+
+### heat maps by phase for O&G sites ###
+
+
+
+#heatmap of acute HIs by phase and endpoint average across sites - 50th percentile values
+```{r}
+
+#filter for just O&G sites and get the average HI of each site for each phase
+HI50_avg_phase = HI50 %>%
+  filter(Sampling.Site == "Interchange A" | Sampling.Site == "Interchange B" | Sampling.Site == "Livingston" | Sampling.Site == "Northwest A" | Sampling.Site == "Northwest B" | Sampling.Site == "United") %>%
+  group_by(Phase, Endpoint) %>%
+  summarize(average_HI = mean(HI, na.rm = TRUE)) %>%
+  ungroup()
+
+#get Highlight column to create box in heatmap
+HI50_avg_phase = HI50_avg_phase %>%
+  mutate(Highlight = average_HI > 1)
+
+HI50_avg_phase$Phase <- factor(HI50_avg_phase$Phase)
+HI50_avg_phase$Endpoint <- factor(HI50_avg_phase$Endpoint)
+
+#graph and save
+phase = c("Drilling", "Well Completions", "Production")
+
+heat_HI50_phase = ggplot(HI50_avg_phase, aes(x = Phase, y = Endpoint, fill = average_HI)) +
+  geom_tile(aes(fill = average_HI)) +
+  geom_rect(data = HI50_avg_phase %>% filter(Highlight), 
+            aes(xmin = as.numeric(Phase) - 0.5, 
+                xmax = as.numeric(Phase) + 0.5, 
+                ymin = as.numeric(Endpoint) - 0.5, 
+                ymax = as.numeric(Endpoint) + 0.5), 
+            fill = NA, color = "black", size = 1) +
+  geom_tile(color = "black", fill = NA, size = 0.2) +
+  scale_fill_gradientn(colors = brewer.pal(9, "YlGnBu")) +
+  scale_x_discrete(labels = phase) +
+  theme_bw() +
+  labs(title = "Acute Hazard Indices (Median Chemical Conc.)",
+       x = "Phase",
+       y = "Endpoint",
+       fill = "Avgerage HI") +
+    theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 14),
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 16),
+        plot.title = element_text(size = 18))
+
+heat_HI50_phase
+
+ggsave(filename = "heat_acuteHI50_phase_OG.png", device = "png", plot = heat_HI50_phase, path = "~/CO_CRA/CO_CRA/Output/", width = 7, height = 10)
+```
+
+
+#heatmap of acute HIs by phase and endpoint average across sites - 95th percentile values
+```{r}
+
+#filter for just O&G sites and get the average HI of each site for each phase
+HI95_avg_phase = HI95 %>%
+  filter(Sampling.Site == "Interchange A" | Sampling.Site == "Interchange B" | Sampling.Site == "Livingston" | Sampling.Site == "Northwest A" | Sampling.Site == "Northwest B" | Sampling.Site == "United") %>%
+  group_by(Phase, Endpoint) %>%
+  summarize(average_HI = mean(HI, na.rm = TRUE)) %>%
+  ungroup()
+
+#get Highlight column to create box in heatmap
+HI95_avg_phase = HI95_avg_phase %>%
+  mutate(Highlight = average_HI > 1)
+
+HI95_avg_phase$Phase <- factor(HI95_avg_phase$Phase)
+HI95_avg_phase$Endpoint <- factor(HI95_avg_phase$Endpoint)
+
+#graph and save
+phase = c("Drilling", "Well Completions", "Production")
+
+heat_HI95_phase = ggplot(HI95_avg_phase, aes(x = Phase, y = Endpoint, fill = average_HI)) +
+  geom_tile(aes(fill = average_HI)) +
+  geom_rect(data = HI95_avg_phase %>% filter(Highlight), 
+            aes(xmin = as.numeric(Phase) - 0.5, 
+                xmax = as.numeric(Phase) + 0.5, 
+                ymin = as.numeric(Endpoint) - 0.5, 
+                ymax = as.numeric(Endpoint) + 0.5), 
+            fill = NA, color = "black", size = 1) +
+  geom_tile(color = "black", fill = NA, size = 0.2) +
+  scale_fill_gradientn(colors = brewer.pal(9, "YlGnBu")) +
+  scale_x_discrete(labels = phase) +
+  theme_bw() +
+  labs(title = "Acute Hazard Indices (95th Perc. Chemical Conc.)",
+       x = "Phase",
+       y = "Endpoint",
+       fill = "Avgerage HI") +
+    theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 14),
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 16),
+        plot.title = element_text(size = 18))
+
+heat_HI95_phase
+
+ggsave(filename = "heat_acuteHI95_phase_OG.png", device = "png", plot = heat_HI95_phase, path = "~/CO_CRA/CO_CRA/Output/", width = 7, height = 10)
+```
+
+
+
+### heat maps by phase for Anthem ###
+
+
+#heatmap of acute HIs by phase and endpoint - 50th percentile values
+```{r}
+#filter for anthem
+HI50_anthem = HI50 %>%
+  filter(Sampling.Site == "Anthem")
+
+#get Highlight column to create box in heatmap
+HI50_anthem = HI50_anthem %>%
+  mutate(Highlight = HI > 1)
+
+HI50_anthem$Phase <- factor(HI50_anthem$Phase)
+HI50_anthem$Endpoint <- factor(HI50_anthem$Endpoint)
+
+#graph and save
+comm_phase = c("Well Completions", "Production")
+
+heat_HI50_anthem = ggplot(HI50_anthem, aes(x = Phase, y = Endpoint, fill = HI)) +
+  geom_tile(aes(fill = HI)) +
+  geom_rect(data = HI50_anthem %>% filter(Highlight), 
+            aes(xmin = as.numeric(Phase) - 0.5, 
+                xmax = as.numeric(Phase) + 0.5, 
+                ymin = as.numeric(Endpoint) - 0.5, 
+                ymax = as.numeric(Endpoint) + 0.5), 
+            fill = NA, color = "black", size = 1) +
+  geom_tile(color = "black", fill = NA, size = 0.2) +
+  scale_fill_gradientn(colors = brewer.pal(9, "YlGnBu")) +
+  theme_bw() +
+  scale_x_discrete(labels = comm_phase) +
+  labs(title = "Acute Hazard Indices - Anthem (Median Chemical Conc.)",
+       x = "Phase of Nearby Pad",
+       y = "Endpoint",
+       fill = "HI") +
+  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 14),
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 16),
+        plot.title = element_text(size = 18))
+
+heat_HI50_anthem
+
+ggsave(filename = "heat_acuteHI50_phase_anthem.png", device = "png", plot = heat_HI50_anthem, path = "~/CO_CRA/CO_CRA/Output/", width = 10, height = 10)
+```
+
+
+#heatmap of acute HIs by phase and endpoint - 95th percentile values
+```{r}
+#filter for anthem
+HI95_anthem = HI95 %>%
+  filter(Sampling.Site == "Anthem")
+
+#get Highlight column to create box in heatmap
+HI95_anthem = HI95_anthem %>%
+  mutate(Highlight = HI > 1)
+
+HI95_anthem$Phase <- factor(HI95_anthem$Phase)
+HI95_anthem$Endpoint <- factor(HI95_anthem$Endpoint)
+
+#graph and save
+comm_phase = c("Well Completions", "Production")
+
+heat_HI95_anthem = ggplot(HI95_anthem, aes(x = Phase, y = Endpoint, fill = HI)) +
+  geom_tile(aes(fill = HI)) +
+  geom_rect(data = HI95_anthem %>% filter(Highlight), 
+            aes(xmin = as.numeric(Phase) - 0.5, 
+                xmax = as.numeric(Phase) + 0.5, 
+                ymin = as.numeric(Endpoint) - 0.5, 
+                ymax = as.numeric(Endpoint) + 0.5), 
+            fill = NA, color = "black", size = 1) +
+  geom_tile(color = "black", fill = NA, size = 0.2) +
+  scale_fill_gradientn(colors = brewer.pal(9, "YlGnBu")) +
+  theme_bw() +
+  scale_x_discrete(labels = comm_phase) +
+  labs(title = "Acute Hazard Indices - Anthem (95th Perc. Chemical Conc.)",
+       x = "Phase of Nearby Pad",
+       y = "Endpoint",
+       fill = "HI") +
+  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 14),
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 16),
+        plot.title = element_text(size = 18))
+
+heat_HI95_anthem
+
+ggsave(filename = "heat_acuteHI95_phase_anthem.png", device = "png", plot = heat_HI95_anthem, path = "~/CO_CRA/CO_CRA/Output/", width = 10, height = 10)
+```
+
+
+
+
+
+
+### stacked bar plots by phase for O&G only ### 
+
+
+
+
+
+
+#stacked bar plot of chemical-specific HQs for immunological effects for each phase (95th percentile) for O&G only
+```{r}
+#filter for immunological endpoint and get the average HQ of each site for each phase
+HQ95_immuno = HQ95 %>%
+  filter(Sampling.Site == "Interchange A" | Sampling.Site == "Interchange B" | Sampling.Site == "Livingston" | Sampling.Site == "Northwest A" | Sampling.Site == "Northwest B" | Sampling.Site == "United") %>%
+  filter(Endpoint == "immunological") %>%
+  group_by(Phase, Chemical) %>%
+  summarize(average_HQ = mean(HQ, na.rm = TRUE)) %>%
+  ungroup()
+
+# Generate a color palette using Rcolorbrewer's hexadecimal codes for YlGnBu to match heatmaps (asked ChatGPT to give me 2 more colors within the scheme)
+brewer.pal(n = 9, name = "YlGnBu") 
+
+chemical_colors = c("Aliphatic_low" = "#FFFFD9", "Aromatic_medium" = "#EDF8B1", "Benzene" = "#D9E57A", "Ethylbenzene" = "#C7E9B4", "n.Nonane" = "#7FCDBB", "Ozone" = "#6AB4A7", "PCE" = "#41B6C4", "Styrene" = "#1D91C0", "TCE" = "#225EA8", "Toluene" = "#253494", "Xylenes" = "#081D58")
+
+#make stacked bar plot 
+bar_immuno95_phase = ggplot(HQ95_immuno, aes(x = Phase, y = average_HQ, fill = Chemical)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = chemical_colors) +  # Use custom colors from RColorBrewer palette
+  theme_bw() +
+  labs(title = "Acute Immunological HQs - 95th Perc. Chemical Conc.", 
+       x = "Phase", 
+       y = "Average HQ", 
+       fill = "Chemical") +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  scale_x_discrete(labels = c("pre" = "Well Completions", "prod" = "Production")) +
+  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 14),
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 16),
+        plot.title = element_text(size = 18))
+
+bar_immuno95_phase
+
+ggsave(filename = "bar_acuteHQ95_immuno_phase_OG.png", device = "png", plot = bar_immuno95_phase, path = "~/CO_CRA/CO_CRA/Output/", width = 7, height = 10)
+```
+
+
+
+#stacked bar plot of chemical-specific HQs for respiratory effects for each phase (95th percentile) for O&G only
+```{r}
+#filter for respiratory endpoint and get the average HQ of each site for each phase
+HQ95_resp = HQ95 %>%
+  filter(Sampling.Site == "Interchange A" | Sampling.Site == "Interchange B" | Sampling.Site == "Livingston" | Sampling.Site == "Northwest A" | Sampling.Site == "Northwest B" | Sampling.Site == "United") %>%
+  filter(Endpoint == "respiratory") %>%
+  group_by(Phase, Chemical) %>%
+  summarize(average_HQ = mean(HQ, na.rm = TRUE)) %>%
+  ungroup()
+
+#make stacked bar plot 
+bar_resp95_phase = ggplot(HQ95_resp, aes(x = Phase, y = average_HQ, fill = Chemical)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = chemical_colors) +  # Use custom colors from RColorBrewer palette
+  theme_bw() +
+  labs(title = "Acute Respiratory HQs - 95th Perc. Chemical Conc.", 
+       x = "Phase", 
+       y = "Average HQ", 
+       fill = "Chemical") +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  scale_x_discrete(labels = c("pre" = "Well Completions", "prod" = "Production")) +
+  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 14),
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 16),
+        plot.title = element_text(size = 18))
+
+bar_resp95_phase
+
+ggsave(filename = "bar_acuteHQ95_resp_phase_OG.png", device = "png", plot = bar_resp95_phase, path = "~/CO_CRA/CO_CRA/Output/", width = 7, height = 10)
+
+```
+
+
+#stacked bar plot of chemical-specific HQs for developmental effects for each phase (95th percentile) for O&G only
+```{r}
+#filter for respiratory endpoint and get the average HQ of each site for each phase
+HQ95_dev = HQ95 %>%
+  filter(Sampling.Site == "Interchange A" | Sampling.Site == "Interchange B" | Sampling.Site == "Livingston" | Sampling.Site == "Northwest A" | Sampling.Site == "Northwest B" | Sampling.Site == "United") %>%
+  filter(Endpoint == "developmental") %>%
+  group_by(Phase, Chemical) %>%
+  summarize(average_HQ = mean(HQ, na.rm = TRUE)) %>%
+  ungroup()
+
+
+#make stacked bar plot 
+bar_dev95_phase = ggplot(HQ95_dev, aes(x = Phase, y = average_HQ, fill = Chemical)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = chemical_colors) +  # Use custom colors from RColorBrewer palette
+  theme_bw() +
+  labs(title = "Acute Developmental HQs - 95th Perc. Chemical Conc.", 
+       x = "Phase", 
+       y = "Average HQ", 
+       fill = "Chemical") +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  scale_x_discrete(labels = c("pre" = "Well Completions", "prod" = "Production")) +
+  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 14),
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 16),
+        plot.title = element_text(size = 18))
+
+bar_dev95_phase
+
+ggsave(filename = "bar_acuteHQ95_dev_phase_OG.png", device = "png", plot = bar_dev95_phase, path = "~/CO_CRA/CO_CRA/Output/", width = 7, height = 10)
+
+```
+
+
+#stacked bar plot of chemical-specific HQs for reproductive effects for each phase (95th percentile) for O&G only
+```{r}
+#filter for reproductive  endpoint and get the average HQ of each site for each phase
+HQ95_repro = HQ95 %>%
+  filter(Sampling.Site == "Interchange A" | Sampling.Site == "Interchange B" | Sampling.Site == "Livingston" | Sampling.Site == "Northwest A" | Sampling.Site == "Northwest B" | Sampling.Site == "United") %>%
+  filter(Endpoint == "reproductive") %>%
+  group_by(Phase, Chemical) %>%
+  summarize(average_HQ = mean(HQ, na.rm = TRUE)) %>%
+  ungroup()
+
+
+#make stacked bar plot 
+bar_repro95_phase = ggplot(HQ95_repro, aes(x = Phase, y = average_HQ, fill = Chemical)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = chemical_colors) +  # Use custom colors from RColorBrewer palette
+  theme_bw() +
+  labs(title = "Acute Reproductive HQs - 95th Perc. Chemical Conc.", 
+       x = "Phase", 
+       y = "Average HQ", 
+       fill = "Chemical") +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  scale_x_discrete(labels = c("pre" = "Well Completions", "prod" = "Production")) +
+  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 14),
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 16),
+        plot.title = element_text(size = 18))
+
+bar_repro95_phase
+
+ggsave(filename = "bar_acuteHQ95_repro_phase_OG.png", device = "png", plot = bar_repro95_phase, path = "~/CO_CRA/CO_CRA/Output/", width = 7, height = 10)
+
+```
+
+#stacked bar plot of chemical-specific HQs for neurological effects for each phase (95th percentile) for O&G only
+```{r}
+#filter for neurological endpoint and get the average HQ of each site for each phase
+HQ95_neuro = HQ95 %>%
+  filter(Sampling.Site == "Interchange A" | Sampling.Site == "Interchange B" | Sampling.Site == "Livingston" | Sampling.Site == "Northwest A" | Sampling.Site == "Northwest B" | Sampling.Site == "United") %>%
+  filter(Endpoint == "neurological") %>%
+  group_by(Phase, Chemical) %>%
+  summarize(average_HQ = mean(HQ, na.rm = TRUE)) %>%
+  ungroup()
+
+
+#make stacked bar plot 
+bar_neuro95_phase = ggplot(HQ95_neuro, aes(x = Phase, y = average_HQ, fill = Chemical)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = chemical_colors) +  # Use custom colors from RColorBrewer palette
+  theme_bw() +
+  labs(title = "Acute Neurological HQs - 95th Perc. Chemical Conc.", 
+       x = "Phase", 
+       y = "Average HQ", 
+       fill = "Chemical") +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  scale_x_discrete(labels = c("pre" = "Well Completions", "prod" = "Production")) +
+  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 14),
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 16),
+        plot.title = element_text(size = 18))
+
+bar_neuro95_phase
+
+ggsave(filename = "bar_acuteHQ95_neuro_phase_OG.png", device = "png", plot = bar_neuro95_phase, path = "~/CO_CRA/CO_CRA/Output/", width = 7, height = 10)
+
+```
+
+
+## looking at the stacked bar for the hepatic effects for the Northwest site to see what causes it to go above 1
+
+```{r}
+#filter for hepatic endpoint and get the average HQ of each site for each phase
+HQ95_hep = HQ95 %>%
+  filter(Sampling.Site == "Northwest") %>%
+  filter(Endpoint == "hepatic") %>%
+  group_by(Phase, Chemical) %>%
+  summarize(average_HQ = mean(HQ, na.rm = TRUE)) %>%
+  ungroup()
+
+
+#make stacked bar plot 
+bar_hep95_phase = ggplot(HQ95_hep, aes(x = Phase, y = average_HQ, fill = Chemical)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = chemical_colors) +  # Use custom colors from RColorBrewer palette
+  theme_bw() +
+  labs(title = "Acute Hepatic HQs for NW - 95th Perc. Chemical Conc.", 
+       x = "Phase", 
+       y = "Average HQ", 
+       fill = "Chemical") +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  scale_x_discrete(labels = c("pre" = "Well Completions", "prod" = "Production")) +
+  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 14),
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 16),
+        plot.title = element_text(size = 18))
+
+bar_hep95_phase
+
+ggsave(filename = "bar_acuteHQ95_hep_phase_NW.png", device = "png", plot = bar_hep95_phase, path = "~/CO_CRA/CO_CRA/Output/", width = 7, height = 10)
+
+```
+
+
+
+
+
+### stacked bar plots by phase for Anthem ### 
+
+
+
+
+#stacked bar plot of chemical-specific HQs for immunological effects for each phase (95th percentile) for Anthem
+```{r}
+#filter for immunological endpoint and get the average HQ of each site for each phase
+HQ95_immuno_anthem = HQ95 %>%
+  filter(Sampling.Site == "Anthem") %>%
+  filter(Endpoint == "immunological") 
+
+
+#make stacked bar plot 
+bar_immuno95_phase_anthem = ggplot(HQ95_immuno_anthem, aes(x = Phase, y = HQ, fill = Chemical)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = chemical_colors) +  # Use custom colors from RColorBrewer palette
+  theme_bw() +
+  labs(title = "Acute Immunological HQs (Anthem) - 95th Perc. Chemical Conc.", 
+       x = "Phase of Nearby Pad", 
+       y = "HQ", 
+       fill = "Chemical") +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  scale_x_discrete(labels = c("pre" = "Well Completions", "prod" = "Production")) +
+  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 14),
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 16),
+        plot.title = element_text(size = 18))
+
+bar_immuno95_phase_anthem
+
+ggsave(filename = "bar_acuteHQ95_immuno_phase_anthem.png", device = "png", plot = bar_immuno95_phase_anthem, path = "~/CO_CRA/CO_CRA/Output/", width = 7, height = 10)
+```
+
+
+#stacked bar plot of chemical-specific HQs for respiratory effects for each phase (95th percentile) for Anthem
+```{r}
+#filter for respiratory endpoint and get the average HQ of each site for each phase
+HQ95_resp_anthem = HQ95 %>%
+  filter(Sampling.Site == "Anthem") %>%
+  filter(Endpoint == "respiratory")
+
+
+#make stacked bar plot 
+bar_resp95_phase_anthem = ggplot(HQ95_resp_anthem, aes(x = Phase, y = HQ, fill = Chemical)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = chemical_colors) +  # Use custom colors from RColorBrewer palette
+  theme_bw() +
+  labs(title = "Acute Respiratory HQs (Anthem) - 95th Perc. Chemical Conc.", 
+       x = "Phase of Nearby Pad", 
+       y = "HQ", 
+       fill = "Chemical") +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  scale_x_discrete(labels = c("pre" = "Well Completions", "prod" = "Production")) +
+  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 14),
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 16),
+        plot.title = element_text(size = 18))
+
+bar_resp95_phase_anthem
+
+ggsave(filename = "bar_acuteHQ95_resp_phase_anthem.png", device = "png", plot = bar_resp95_phase_anthem, path = "~/CO_CRA/CO_CRA/Output/", width = 7, height = 10)
+```
+
+
+#stacked bar plot of chemical-specific HQs for developmental effects for each phase (95th percentile) for Anthem
+```{r}
+#filter for developmental endpoint and get the average HQ of each site for each phase
+HQ95_dev_anthem = HQ95 %>%
+  filter(Sampling.Site == "Anthem") %>%
+  filter(Endpoint == "developmental")
+
+
+#make stacked bar plot 
+bar_dev95_phase_anthem = ggplot(HQ95_dev_anthem, aes(x = Phase, y = HQ, fill = Chemical)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = chemical_colors) +  # Use custom colors from RColorBrewer palette
+  theme_bw() +
+  labs(title = "Acute Developmental HQs (Anthem) - 95th Perc. Chemical Conc.", 
+       x = "Phase of Nearby Pad", 
+       y = "HQ", 
+       fill = "Chemical") +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  scale_x_discrete(labels = c("pre" = "Well Completions", "prod" = "Production")) +
+  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 14),
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 16),
+        plot.title = element_text(size = 18))
+
+bar_dev95_phase_anthem
+
+ggsave(filename = "bar_acuteHQ95_dev_phase_anthem.png", device = "png", plot = bar_dev95_phase_anthem, path = "~/CO_CRA/CO_CRA/Output/", width = 7, height = 10)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

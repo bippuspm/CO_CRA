@@ -1,0 +1,315 @@
+---
+title: "Chronic Risk Calculations for 50th percentile values"
+author: "Paige Varner"
+date: "2024-06-10"
+output: html_document
+---
+
+
+
+#load libraries and data
+```{r}
+library("dplyr")
+library("bigrquery")
+library("DBI")
+library("pheatmap")
+library("RColorBrewer")
+library("Rmisc")
+library("stats")
+library("rstatix")
+library("ggplot2")
+library("tidyr")
+library("car")
+library("janitor")
+library("dunn.test")
+library("sf")
+detach(package:Rmisc)
+detach(package:plyr)
+
+ozone = read.csv("~/CO_CRA/CO_CRA/Data/Ozone8hour2018to2023.csv")
+anthem = read.csv("~/CO_CRA/CO_CRA/Data/weekly_Anthem.csv")
+commons = read.csv("~/CO_CRA/CO_CRA/Data/weekly_Commons.csv")
+ica = read.csv("~/CO_CRA/CO_CRA/Data/weekly_ICA.csv")
+icb = read.csv("~/CO_CRA/CO_CRA/Data/weekly_ICB.csv")
+livingston = read.csv("~/CO_CRA/CO_CRA/Data/weekly_Livingston.csv")
+nwa = read.csv("~/CO_CRA/CO_CRA/Data/weekly_NWA.csv")
+nwb = read.csv("~/CO_CRA/CO_CRA/Data/weekly_NWB.csv")
+united = read.csv("~/CO_CRA/CO_CRA/Data/weekly_United.csv")
+wildgrass = read.csv("~/CO_CRA/CO_CRA/Data/weekly_Wildgrass.csv")
+
+rfcs = read.csv("~/CO_CRA/CO_CRA/Data/RfCs.csv")
+iurs = read.csv("~/CO_CRA/CO_CRA/Data/IURs.csv")
+```
+
+
+#combine all sites to merge ozone data
+```{r}
+#add location name to each df to separate later
+anthem$Sampling.Site = "Anthem"
+commons$Sampling.Site = "Commons"
+ica$Sampling.Site = "Interchange A"
+icb$Sampling.Site = "Interchange B"
+livingston$Sampling.Site = "Livingston"
+nwa$Sampling.Site = "Northwest A"
+nwb$Sampling.Site = "Northwest B"
+united$Sampling.Site = "United"
+wildgrass$Sampling.Site = "Wildgrass"
+
+#combine
+all = bind_rows(anthem, commons, ica, icb, livingston, nwa, nwb, united, wildgrass)
+```
+
+
+#calculate 50th percentile of ozone mean within specified weekly dates
+```{r}
+#convert date columns to date class
+all$Start.Date.Time <- as.Date(all$Start.Date.Time)
+all$Stop.Date.Time <- as.Date(all$Stop.Date.Time)
+ozone$Date.Local <- as.Date(ozone$Date.Local)
+
+# Initialize a vector to store the results
+ozone_percentiles <- numeric(nrow(all))
+
+# Iterate over each row in the united dataframe
+for (i in 1:nrow(all)) {
+  start_date <- all$Start.Date.Time[i]
+  stop_date <- all$Stop.Date.Time[i]
+  
+  # Filter ozone dataframe for the date range
+  filtered_ozone <- ozone %>%
+    filter(Date.Local >= start_date & Date.Local <= stop_date)
+  
+  # Calculate the 95th percentile of the Arithmetic.Mean values
+  if (nrow(filtered_ozone) > 0) {
+    percentile_50 <- quantile(filtered_ozone$Arithmetic.Mean, 0.50)
+  } else {
+    percentile_50 <- NA
+  }
+  
+  # Store the result in the vector
+  ozone_percentiles[i] <- percentile_50
+}
+
+# Add the results as a new column in the united dataframe
+all$Ozone <- ozone_percentiles
+
+#multiply ozone values by 1000 to convert to ppb
+all$Ozone = all$Ozone*1000
+```
+
+
+#remove rows with no ozone values (ozone values not reported past August 31, 2023, so will not be doing analysis for these times)
+```{r}
+all_clean = all %>% filter(!is.na(Ozone))
+write.csv(all_clean, file = "~/CO_CRA/CO_CRA/full_Rdata.csv")
+```
+
+
+## Calculating HIs including ozone ##
+
+
+#format data to calculate chronic HQs and HIs
+```{r}
+#filter RfCs for chronic
+chronic_rfcs = rfcs %>% filter(Exposure == "chronic")
+
+#fix chemical columns and their names, and filter for chemicals we're looking at
+all_clean$Xylenes = all_clean$o.Xylene + all_clean$m..and.p.Xylene
+
+chronic_rfcs$Chemical = gsub("n-octane", "n.Octane", chronic_rfcs$Chemical)
+chronic_rfcs$Chemical = gsub("n-nonane", "n.Nonane", chronic_rfcs$Chemical)
+chronic_rfcs$Chemical = gsub("n-decane", "n.Decane", chronic_rfcs$Chemical)
+chronic_rfcs$Chemical = gsub("Trichloroethylene", "C2HCl3", chronic_rfcs$Chemical)
+chronic_rfcs$Chemical = gsub("Tetrachloroethylene", "C2Cl4", chronic_rfcs$Chemical)
+
+#add chemical concentrations together for aliphatic low and aromatic medium groups
+all_clean$Aliphatic_low = all_clean$n.Octane + all_clean$i.Pentane + all_clean$n.Pentane + all_clean$trans.2.Pentene + all_clean$X1.Pentene + all_clean$cis.2.Pentene + all_clean$n.Hexane + all_clean$Isoprene + all_clean$X2.4.Dimethylpentane + all_clean$n.Heptane + all_clean$Cyclohexane + all_clean$X2.3.Dimethylpentane + all_clean$X2.Methylhexane + all_clean$X3.Methylhexane + all_clean$X2.2.4.Trimethylpentane + all_clean$Methylcyclohexane + all_clean$X2.3.4.Trimethylpentane + all_clean$X2.Methylheptane + all_clean$X3.Methylheptane + all_clean$Cycopentane
+
+all_clean$Aromatic_medium = all_clean$i.Propylbenzene + all_clean$n.Propylbenzene + all_clean$X3.Ethyltoluene + all_clean$X4.Ethyltoluene + all_clean$X1.3.5.Trimethylbenzene + all_clean$X2.Ethyltoluene + all_clean$X1.2.4.Trimethylbenzene + all_clean$X1.2.3.Trimethylbenzene + all_clean$X1.3.Diethylbenzene + all_clean$X1.4.Diethylbenzene
+```
+
+
+#calculate 50th percentile concentrations for sites/phase and calculate TWA of those values to get overall concentration for each site (start back here)
+
+```{r}
+percentiles_df <- all_clean %>%
+  group_by(Sampling.Site, Phase, Mud) %>%
+  summarise_at(vars(Benzene, Ethylbenzene, Toluene, Xylenes, n.Octane, n.Nonane, n.Decane, Ozone, Aliphatic_low, Aromatic_medium, Styrene, C2HCl3, C2Cl4, Propene), ~ quantile(., 0.50, na.rm = TRUE))
+
+#Save percentiles df to add overall start and stop dates for each phase for each site, and read back in to calculate durations for each site
+
+write.csv(percentiles_df, file = "~/CO_CRA/CO_CRA/Data/percentiles_df_50.csv")
+duration_df = read.csv(file = "~/CO_CRA/CO_CRA/Data/duration_df_50.csv")
+
+duration_df <- duration_df %>%
+  mutate(Start.Date.Time = as.Date(Start.Date.Time),
+         Stop.Date.Time = as.Date(Stop.Date.Time))
+
+duration_df <- duration_df %>%
+  mutate(Duration = as.numeric(Stop.Date.Time - Start.Date.Time))
+
+#assume 30 years of duration for production phases
+duration_df <- duration_df %>%
+  mutate(Duration = ifelse(Phase == "prod", 10950, Duration))
+
+duration_df <- duration_df %>%
+  mutate(Duration = ifelse(Sampling.Site == "Commons", 10950, Duration))
+
+#Calculate TWA for each chemical for each sampling site
+twa_df <- duration_df %>%
+  group_by(Sampling.Site) %>%
+  summarise_at(vars(Benzene, Ethylbenzene, Toluene, Xylenes, n.Octane, n.Nonane, n.Decane, Ozone, Aliphatic_low, Aromatic_medium, Styrene, C2HCl3, C2Cl4, Propene), ~ sum(.x * Duration, na.rm = TRUE) / sum(Duration, na.rm = TRUE))
+
+#format twa_df to long to match up to chronic_rfcs column
+twa_long = twa_df %>%
+  pivot_longer(cols = c("Benzene", "Ethylbenzene", "Toluene", "Xylenes", "n.Octane", "n.Nonane", "n.Decane", "Ozone", "Aliphatic_low", "Aromatic_medium", "Styrene", "C2HCl3", "C2Cl4", "Propene"), names_to = "Chemical", values_to = "Value")
+
+#get sample size used in 50th and 95th percentile calculations and save for records
+
+sample_size = all_clean %>%
+      group_by(Sampling.Site, Phase, Mud) %>%
+      summarise(N = n())
+
+write.csv(sample_size, file = "~/CO_CRA/CO_CRA/Output/chronic_N.csv")
+
+sample_size = all_clean %>%
+      group_by(Sampling.Site) %>%
+      summarise(N = n())
+
+write.csv(sample_size, file = "~/CO_CRA/CO_CRA/Output/chronic_N_sites.csv")
+```
+
+
+
+#calculate chronic HQs and HIs for each endpoint group 
+```{r}
+#merge twa and rfc dataframes
+twa_rfcs = twa_long %>%
+  inner_join(chronic_rfcs, by = "Chemical")
+
+#calculate HQs
+twa_rfcs <- twa_rfcs %>%
+  mutate(HQ = Value / RfC)
+
+#calculate HIs for each site, drilling/pre/prod, for each endpoint
+
+chronic_HIs = twa_rfcs %>%
+  group_by(Sampling.Site, Endpoint) %>%
+  summarise(HI = sum(HQ)) 
+
+#save data
+write.csv(chronic_HIs, file = "~/CO_CRA/CO_CRA/Output/chronic_TWA_HIs_50.csv")
+write.csv(twa_rfcs, file = "~/CO_CRA/CO_CRA/Output/chronic_TWA_HQs_50.csv")
+
+```
+
+
+## Calculating VOC-only HIs and ozone-only HQs for use in combining via site ##
+
+#format data to include TWA concentrations for only VOCs
+```{r}
+twa_df_VOCs = twa_df %>%
+  select(-Ozone)
+
+#format to long to match up to chronic_rfcs column
+twa_VOCs_long = twa_df_VOCs %>%
+  pivot_longer(cols = c("Benzene", "Ethylbenzene", "Toluene", "Xylenes", "n.Octane", "n.Nonane", "n.Decane", "Aliphatic_low", "Aromatic_medium", "Styrene", "C2HCl3", "C2Cl4", "Propene"), names_to = "Chemical", values_to = "Value")
+
+```
+
+
+#calculate chronic HQs and HIs for each endpoint group 
+```{r}
+#merge twa and rfc dataframes
+twa_rfcs_VOCs = twa_VOCs_long %>%
+  inner_join(chronic_rfcs, by = "Chemical")
+
+#calculate HQs
+twa_rfcs_VOCs <- twa_rfcs_VOCs %>%
+  mutate(HQ = Value / RfC)
+
+#calculate HIs for each site, drilling/pre/prod, for each endpoint
+
+chronic_HIs_VOCs = twa_rfcs_VOCs %>%
+  group_by(Sampling.Site, Endpoint) %>%
+  summarise(HI = sum(HQ)) 
+
+#save data
+write.csv(chronic_HIs_VOCs, file = "~/CO_CRA/CO_CRA/Output/chronic_TWA_HIs_VOCs_50.csv")
+```
+
+
+#Save ozone-only HQs per site to add after VOC-only HIs are merged in ArcGIS by Meagan
+```{r}
+ozone_HQs = twa_rfcs %>%
+  filter(Chemical == "Ozone") %>%
+  select(-RfC)
+
+write.csv(ozone_HQs, file = "~/CO_CRA/CO_CRA/Output/chronic_ozone_HQs_50.csv")
+```
+
+
+
+## Calculate cancer risks ## 
+
+#format data
+```{r}
+#filter twa_df for just benzene, ethylbenzene, and aliphatic_low and format to long
+twa_cancer = twa_df %>%
+  select(Sampling.Site, Benzene, Ethylbenzene, Aliphatic_low) %>%
+  pivot_longer(cols = c("Benzene", "Ethylbenzene", "Aliphatic_low"), names_to = "Chemical", values_to = "Value")
+
+#calculate total duration for each site from duration_df
+
+duration_bysite = duration_df %>%
+  group_by(Sampling.Site) %>%
+  summarise(TotDur = sum(Duration, na.rm = TRUE))
+
+#merge twa_cancer with duration_bysite
+twa_duration_cancer = left_join(duration_bysite, twa_cancer, by = "Sampling.Site")
+
+#merge twa_cancer and iur dataframes
+twa_duration_iurs = twa_duration_cancer %>%
+  inner_join(iurs, by = "Chemical")
+```
+
+
+
+#calculate cancer risk with exposure adjustment, assuming 30 years of exposure for production
+```{r}
+#calculate cancer risk
+cancerrisk_OGduration <- twa_duration_iurs %>%
+  mutate(Ind_Risk = ((Value * IUR..ppb. * (TotDur / 365)) / 78 ))
+
+#calculate cancer risk for each site by summing the cancer risks between benzene, EB, and aliphatic_lows
+cancerrisk_OGduration_cum = cancerrisk_OGduration %>%
+  group_by(Sampling.Site) %>%
+  summarise(Total_Cancer_Risk = sum(Ind_Risk)) 
+
+#save data 
+write.csv(cancerrisk_OGduration, file = "~/CO_CRA/CO_CRA/Output/cancer_individual_50.csv")
+
+write.csv(cancerrisk_OGduration_cum, file = "~/CO_CRA/CO_CRA/Output/cancer_cumulative_50.csv")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
