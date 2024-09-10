@@ -15,6 +15,8 @@ library("stats")
 library("rstatix")
 library("ggplot2")
 library("tidyr")
+library("grid")
+library("scales")
 detach(package:Rmisc)
 detach(package:plyr)
 
@@ -250,7 +252,10 @@ bar_cancer50 = ggplot(cancer50, aes(x = Sampling.Site, y = Ind_Risk, fill = Chem
   geom_bar(stat = "identity", position = "stack") +
   scale_fill_manual(values = chemical_colors) + 
   theme_bw() +
-  scale_y_continuous(labels = scales::scientific) +
+  # Apply scientific labeling to all y-axis breaks
+  scale_y_continuous(breaks = c(1e-6, 5e-5, 1e-4, 1.5e-4, 2e-4),
+                     labels = label_scientific(digits = 1),  # Use label_scientific to format y-axis labels
+                     expand = c(0, 0)) +  # Make bars flush with the x-axis
   labs(title = "Cancer Risk - Median Chemical Conc.", 
        x = "Site", 
        y = "Cancer Risk", 
@@ -265,9 +270,12 @@ bar_cancer50 = ggplot(cancer50, aes(x = Sampling.Site, y = Ind_Risk, fill = Chem
         legend.title = element_text(size = 16),
         plot.title = element_text(size = 18))
 
+
+
 bar_cancer50
 
 ggsave(filename = "bar_cancer50.png", device = "png", plot = bar_cancer50, path = "~/CO_CRA/CO_CRA/Output/", width = 10, height = 10)
+
 ```
 
 
@@ -296,8 +304,11 @@ bar_cancer95 = ggplot(cancer95, aes(x = Sampling.Site, y = Ind_Risk, fill = Chem
   geom_bar(stat = "identity", position = "stack") +
   scale_fill_manual(values = chemical_colors) + 
   theme_bw() +
-  scale_y_continuous(labels = scales::scientific) +
-  labs(title = "Cancer Risk - 95th Perc. Chemical Conc.", 
+  # Apply scientific labeling to all y-axis breaks
+  scale_y_continuous(breaks = c(1e-6, 5e-5, 1e-4, 1.5e-4, 2e-4, 2.5e-4, 3e-4),
+                     labels = label_scientific(digits = 1),  # Use label_scientific to format y-axis labels
+                     expand = c(0, 0)) +  # Make bars flush with the x-axis
+  labs(title = "Cancer Risk - Median Chemical Conc.", 
        x = "Site", 
        y = "Cancer Risk", 
        fill = "Chemical") +
