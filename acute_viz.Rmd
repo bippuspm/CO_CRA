@@ -30,6 +30,7 @@ HQ95$Chemical[HQ95$Chemical == "C2HCl3"] = "TCE"
 ```
 
 
+
 ### heat maps by site ###
 
 
@@ -48,6 +49,8 @@ HI50_clean = HI50_clean %>%
 HI50_clean$Sampling.Site <- factor(HI50_clean$Sampling.Site)
 HI50_clean$Endpoint <- factor(HI50_clean$Endpoint)
 
+
+
 #graph and save
 heat_HI50 = ggplot(HI50_clean, aes(x = Sampling.Site, y = Endpoint, fill = average_HI)) +
   geom_tile(aes(fill = average_HI)) +
@@ -56,21 +59,19 @@ heat_HI50 = ggplot(HI50_clean, aes(x = Sampling.Site, y = Endpoint, fill = avera
                 xmax = as.numeric(Sampling.Site) + 0.5, 
                 ymin = as.numeric(Endpoint) - 0.5, 
                 ymax = as.numeric(Endpoint) + 0.5), 
-            fill = NA, color = "black", size = 1) +
+            fill = NA, color = "red", size = 2) +
   geom_tile(color = "black", fill = NA, size = 0.2) +
   scale_fill_gradientn(colors = brewer.pal(9, "YlGnBu")) +
   theme_bw() +
-  labs(title = "Acute Hazard Indices (Median Chemical Conc.)",
-       x = "Site",
+  labs(       x = "Site",
        y = "Endpoint",
        fill = "Average HI") +
-  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
-        axis.text.y = element_text(size = 14),
-        axis.title.x = element_text(size = 16),
-        axis.title.y = element_text(size = 16),
-        legend.text = element_text(size = 14),
-        legend.title = element_text(size = 16),
-        plot.title = element_text(size = 18))
+  theme(axis.text.x = element_text(size = 20, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 20),
+        axis.title.x = element_text(size = 22),
+        axis.title.y = element_text(size = 22),
+        legend.text = element_text(size = 20),
+        legend.title = element_text(size = 22))
 
 heat_HI50
 
@@ -100,21 +101,19 @@ heat_HI95 = ggplot(HI95_clean, aes(x = Sampling.Site, y = Endpoint, fill = avera
                 xmax = as.numeric(Sampling.Site) + 0.5, 
                 ymin = as.numeric(Endpoint) - 0.5, 
                 ymax = as.numeric(Endpoint) + 0.5), 
-            fill = NA, color = "black", size = 1) +
+            fill = NA, color = "red", size = 2) +
   geom_tile(color = "black", fill = NA, size = 0.2) +
   scale_fill_gradientn(colors = brewer.pal(9, "YlGnBu")) +
   theme_bw() +
-  labs(title = "Acute Hazard Indices (95th Perc. Chemical Concentrations)",
-       x = "Site",
+  labs(x = "Site",
        y = "Endpoint",
-       fill = "Avgerage HI") +
-    theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
-        axis.text.y = element_text(size = 14),
-        axis.title.x = element_text(size = 16),
-        axis.title.y = element_text(size = 16),
-        legend.text = element_text(size = 14),
-        legend.title = element_text(size = 16),
-        plot.title = element_text(size = 18))
+       fill = "Average HI") +
+    theme(axis.text.x = element_text(size = 20, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 20),
+        axis.title.x = element_text(size = 22),
+        axis.title.y = element_text(size = 22),
+        legend.text = element_text(size = 20),
+        legend.title = element_text(size = 22))
 
 heat_HI95
 
@@ -136,7 +135,8 @@ HI50_avg_phase = HI50 %>%
   filter(Sampling.Site == "Interchange A" | Sampling.Site == "Interchange B" | Sampling.Site == "Livingston" | Sampling.Site == "Northwest A" | Sampling.Site == "Northwest B" | Sampling.Site == "United") %>%
   group_by(Phase, Endpoint) %>%
   summarize(average_HI = mean(HI, na.rm = TRUE)) %>%
-  ungroup()
+  ungroup() %>%
+  data.frame()
 
 #get Highlight column to create box in heatmap
 HI50_avg_phase = HI50_avg_phase %>%
@@ -144,6 +144,8 @@ HI50_avg_phase = HI50_avg_phase %>%
 
 HI50_avg_phase$Phase <- factor(HI50_avg_phase$Phase)
 HI50_avg_phase$Endpoint <- factor(HI50_avg_phase$Endpoint)
+
+write.csv(HI50_avg_phase, file = "~/CO_CRA/CO_CRA/Output/HI50_avg_phase_OG.csv")
 
 #graph and save
 phase = c("Drilling", "Well Completions", "Production")
@@ -155,22 +157,20 @@ heat_HI50_phase = ggplot(HI50_avg_phase, aes(x = Phase, y = Endpoint, fill = ave
                 xmax = as.numeric(Phase) + 0.5, 
                 ymin = as.numeric(Endpoint) - 0.5, 
                 ymax = as.numeric(Endpoint) + 0.5), 
-            fill = NA, color = "black", size = 1) +
+            fill = NA, color = "red", size = 2) +
   geom_tile(color = "black", fill = NA, size = 0.2) +
   scale_fill_gradientn(colors = brewer.pal(9, "YlGnBu")) +
   scale_x_discrete(labels = phase) +
   theme_bw() +
-  labs(title = "Acute Hazard Indices (Median Chemical Conc.)",
-       x = "Phase",
+  labs(x = "Phase",
        y = "Endpoint",
-       fill = "Avgerage HI") +
-    theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
-        axis.text.y = element_text(size = 14),
-        axis.title.x = element_text(size = 16),
-        axis.title.y = element_text(size = 16),
-        legend.text = element_text(size = 14),
-        legend.title = element_text(size = 16),
-        plot.title = element_text(size = 18))
+       fill = "Average HI") +
+    theme(axis.text.x = element_text(size = 20, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 20),
+        axis.title.x = element_text(size = 22),
+        axis.title.y = element_text(size = 22),
+        legend.text = element_text(size = 20),
+        legend.title = element_text(size = 22))
 
 heat_HI50_phase
 
@@ -195,6 +195,8 @@ HI95_avg_phase = HI95_avg_phase %>%
 HI95_avg_phase$Phase <- factor(HI95_avg_phase$Phase)
 HI95_avg_phase$Endpoint <- factor(HI95_avg_phase$Endpoint)
 
+write.csv(HI95_avg_phase, file = "~/CO_CRA/CO_CRA/Output/HI95_avg_phase_OG.csv")
+
 #graph and save
 phase = c("Drilling", "Well Completions", "Production")
 
@@ -205,22 +207,20 @@ heat_HI95_phase = ggplot(HI95_avg_phase, aes(x = Phase, y = Endpoint, fill = ave
                 xmax = as.numeric(Phase) + 0.5, 
                 ymin = as.numeric(Endpoint) - 0.5, 
                 ymax = as.numeric(Endpoint) + 0.5), 
-            fill = NA, color = "black", size = 1) +
+            fill = NA, color = "red", size = 2) +
   geom_tile(color = "black", fill = NA, size = 0.2) +
   scale_fill_gradientn(colors = brewer.pal(9, "YlGnBu")) +
   scale_x_discrete(labels = phase) +
   theme_bw() +
-  labs(title = "Acute Hazard Indices (95th Perc. Chemical Conc.)",
-       x = "Phase",
+  labs(x = "Phase",
        y = "Endpoint",
        fill = "Avgerage HI") +
-    theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
-        axis.text.y = element_text(size = 14),
-        axis.title.x = element_text(size = 16),
-        axis.title.y = element_text(size = 16),
-        legend.text = element_text(size = 14),
-        legend.title = element_text(size = 16),
-        plot.title = element_text(size = 18))
+    theme(axis.text.x = element_text(size = 20, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 20),
+        axis.title.x = element_text(size = 22),
+        axis.title.y = element_text(size = 22),
+        legend.text = element_text(size = 20),
+        legend.title = element_text(size = 22))
 
 heat_HI95_phase
 
@@ -245,6 +245,8 @@ HI50_anthem = HI50_anthem %>%
 HI50_anthem$Phase <- factor(HI50_anthem$Phase)
 HI50_anthem$Endpoint <- factor(HI50_anthem$Endpoint)
 
+write.csv(HI50_anthem, file = "~/CO_CRA/CO_CRA/Output/HI50_avg_phase_anthem.csv")
+
 #graph and save
 comm_phase = c("Well Completions", "Production")
 
@@ -255,26 +257,24 @@ heat_HI50_anthem = ggplot(HI50_anthem, aes(x = Phase, y = Endpoint, fill = HI)) 
                 xmax = as.numeric(Phase) + 0.5, 
                 ymin = as.numeric(Endpoint) - 0.5, 
                 ymax = as.numeric(Endpoint) + 0.5), 
-            fill = NA, color = "black", size = 1) +
+            fill = NA, color = "red", size = 2) +
   geom_tile(color = "black", fill = NA, size = 0.2) +
   scale_fill_gradientn(colors = brewer.pal(9, "YlGnBu")) +
   theme_bw() +
   scale_x_discrete(labels = comm_phase) +
-  labs(title = "Acute Hazard Indices - Anthem (Median Chemical Conc.)",
-       x = "Phase of Nearby Pad",
+  labs(x = "Phase of Nearby Pad",
        y = "Endpoint",
        fill = "HI") +
-  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
-        axis.text.y = element_text(size = 14),
-        axis.title.x = element_text(size = 16),
-        axis.title.y = element_text(size = 16),
-        legend.text = element_text(size = 14),
-        legend.title = element_text(size = 16),
-        plot.title = element_text(size = 18))
+  theme(axis.text.x = element_text(size = 20, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 20),
+        axis.title.x = element_text(size = 22),
+        axis.title.y = element_text(size = 22),
+        legend.text = element_text(size = 20),
+        legend.title = element_text(size = 22))
 
 heat_HI50_anthem
 
-ggsave(filename = "heat_acuteHI50_phase_anthem.png", device = "png", plot = heat_HI50_anthem, path = "~/CO_CRA/CO_CRA/Output/", width = 10, height = 10)
+ggsave(filename = "heat_acuteHI50_phase_anthem.png", device = "png", plot = heat_HI50_anthem, path = "~/CO_CRA/CO_CRA/Output/", width = 6, height = 10)
 ```
 
 
@@ -291,6 +291,8 @@ HI95_anthem = HI95_anthem %>%
 HI95_anthem$Phase <- factor(HI95_anthem$Phase)
 HI95_anthem$Endpoint <- factor(HI95_anthem$Endpoint)
 
+write.csv(HI95_anthem, file = "~/CO_CRA/CO_CRA/Output/HI95_avg_phase_anthem.csv")
+
 #graph and save
 comm_phase = c("Well Completions", "Production")
 
@@ -301,26 +303,24 @@ heat_HI95_anthem = ggplot(HI95_anthem, aes(x = Phase, y = Endpoint, fill = HI)) 
                 xmax = as.numeric(Phase) + 0.5, 
                 ymin = as.numeric(Endpoint) - 0.5, 
                 ymax = as.numeric(Endpoint) + 0.5), 
-            fill = NA, color = "black", size = 1) +
+            fill = NA, color = "red", size = 2) +
   geom_tile(color = "black", fill = NA, size = 0.2) +
   scale_fill_gradientn(colors = brewer.pal(9, "YlGnBu")) +
   theme_bw() +
   scale_x_discrete(labels = comm_phase) +
-  labs(title = "Acute Hazard Indices - Anthem (95th Perc. Chemical Conc.)",
-       x = "Phase of Nearby Pad",
+  labs(x = "Phase of Nearby Pad",
        y = "Endpoint",
        fill = "HI") +
-  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
-        axis.text.y = element_text(size = 14),
-        axis.title.x = element_text(size = 16),
-        axis.title.y = element_text(size = 16),
-        legend.text = element_text(size = 14),
-        legend.title = element_text(size = 16),
-        plot.title = element_text(size = 18))
+  theme(axis.text.x = element_text(size = 20, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 20),
+        axis.title.x = element_text(size = 22),
+        axis.title.y = element_text(size = 22),
+        legend.text = element_text(size = 20),
+        legend.title = element_text(size = 22))
 
 heat_HI95_anthem
 
-ggsave(filename = "heat_acuteHI95_phase_anthem.png", device = "png", plot = heat_HI95_anthem, path = "~/CO_CRA/CO_CRA/Output/", width = 10, height = 10)
+ggsave(filename = "heat_acuteHI95_phase_anthem.png", device = "png", plot = heat_HI95_anthem, path = "~/CO_CRA/CO_CRA/Output/", width = 6, height = 10)
 ```
 
 
@@ -332,6 +332,16 @@ ggsave(filename = "heat_acuteHI95_phase_anthem.png", device = "png", plot = heat
 
 
 
+#get raw avg HQs for every phase and endpoint for O&G sites for reporting
+```{r}
+HQ95_avg = HQ95 %>%
+  filter(Sampling.Site == "Interchange A" | Sampling.Site == "Interchange B" | Sampling.Site == "Livingston" | Sampling.Site == "Northwest A" | Sampling.Site == "Northwest B" | Sampling.Site == "United") %>%
+  group_by(Phase, Chemical, Endpoint) %>%
+  summarize(average_HQ = mean(HQ, na.rm = TRUE)) %>%
+  ungroup()
+
+write.csv(HQ95_avg, file = "~/CO_CRA/CO_CRA/Output/HQ95_avg_phasechem_OG.csv")
+```
 
 
 
@@ -355,19 +365,17 @@ bar_immuno95_phase = ggplot(HQ95_immuno, aes(x = Phase, y = average_HQ, fill = C
   geom_bar(stat = "identity", position = "stack") +
   scale_fill_manual(values = chemical_colors) +  # Use custom colors from RColorBrewer palette
   theme_bw() +
-  labs(title = "Acute Immunological HQs - 95th Perc. Chemical Conc.", 
-       x = "Phase", 
+  labs(x = "Phase", 
        y = "Average HQ", 
-       fill = "Chemical") +
+       fill = "Chemical(s)") +
   geom_hline(yintercept = 1, linetype = "dashed") +
   scale_x_discrete(labels = c("pre" = "Well Completions", "prod" = "Production")) +
-  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
-        axis.text.y = element_text(size = 14),
-        axis.title.x = element_text(size = 16),
-        axis.title.y = element_text(size = 16),
-        legend.text = element_text(size = 14),
-        legend.title = element_text(size = 16),
-        plot.title = element_text(size = 18))
+  theme(axis.text.x = element_text(size = 20, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 20),
+        axis.title.x = element_text(size = 22),
+        axis.title.y = element_text(size = 22),
+        legend.text = element_text(size = 20),
+        legend.title = element_text(size = 22))
 
 bar_immuno95_phase
 
@@ -391,19 +399,17 @@ bar_resp95_phase = ggplot(HQ95_resp, aes(x = Phase, y = average_HQ, fill = Chemi
   geom_bar(stat = "identity", position = "stack") +
   scale_fill_manual(values = chemical_colors) +  # Use custom colors from RColorBrewer palette
   theme_bw() +
-  labs(title = "Acute Respiratory HQs - 95th Perc. Chemical Conc.", 
-       x = "Phase", 
+  labs(x = "Phase", 
        y = "Average HQ", 
-       fill = "Chemical") +
+       fill = "Chemical(s)") +
   geom_hline(yintercept = 1, linetype = "dashed") +
   scale_x_discrete(labels = c("pre" = "Well Completions", "prod" = "Production")) +
-  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
-        axis.text.y = element_text(size = 14),
-        axis.title.x = element_text(size = 16),
-        axis.title.y = element_text(size = 16),
-        legend.text = element_text(size = 14),
-        legend.title = element_text(size = 16),
-        plot.title = element_text(size = 18))
+  theme(axis.text.x = element_text(size = 20, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 20),
+        axis.title.x = element_text(size = 22),
+        axis.title.y = element_text(size = 22),
+        legend.text = element_text(size = 20),
+        legend.title = element_text(size = 22))
 
 bar_resp95_phase
 
@@ -426,21 +432,20 @@ HQ95_dev = HQ95 %>%
 #make stacked bar plot 
 bar_dev95_phase = ggplot(HQ95_dev, aes(x = Phase, y = average_HQ, fill = Chemical)) +
   geom_bar(stat = "identity", position = "stack") +
-  scale_fill_manual(values = chemical_colors) +  # Use custom colors from RColorBrewer palette
+  scale_fill_manual(values = chemical_colors,
+                     labels = c("Aliphatic_low" = "Aliphatic Low")) +  # Use custom colors from RColorBrewer palette; rename part of legend
   theme_bw() +
-  labs(title = "Acute Developmental HQs - 95th Perc. Chemical Conc.", 
-       x = "Phase", 
+  labs(x = "Phase", 
        y = "Average HQ", 
-       fill = "Chemical") +
+       fill = "Chemical(s)") +
   geom_hline(yintercept = 1, linetype = "dashed") +
   scale_x_discrete(labels = c("pre" = "Well Completions", "prod" = "Production")) +
-  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
-        axis.text.y = element_text(size = 14),
-        axis.title.x = element_text(size = 16),
-        axis.title.y = element_text(size = 16),
-        legend.text = element_text(size = 14),
-        legend.title = element_text(size = 16),
-        plot.title = element_text(size = 18))
+  theme(axis.text.x = element_text(size = 20, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 20),
+        axis.title.x = element_text(size = 22),
+        axis.title.y = element_text(size = 22),
+        legend.text = element_text(size = 20),
+        legend.title = element_text(size = 22))
 
 bar_dev95_phase
 
@@ -463,27 +468,27 @@ HQ95_repro = HQ95 %>%
 #make stacked bar plot 
 bar_repro95_phase = ggplot(HQ95_repro, aes(x = Phase, y = average_HQ, fill = Chemical)) +
   geom_bar(stat = "identity", position = "stack") +
-  scale_fill_manual(values = chemical_colors) +  # Use custom colors from RColorBrewer palette
+  scale_fill_manual(values = chemical_colors,
+                     labels = c("Aliphatic_low" = "Aliphatic Low")) +  # Use custom colors from RColorBrewer palette; rename part of legend
   theme_bw() +
-  labs(title = "Acute Reproductive HQs - 95th Perc. Chemical Conc.", 
-       x = "Phase", 
+  labs(x = "Phase", 
        y = "Average HQ", 
-       fill = "Chemical") +
+       fill = "Chemical(s)") +
   geom_hline(yintercept = 1, linetype = "dashed") +
   scale_x_discrete(labels = c("pre" = "Well Completions", "prod" = "Production")) +
-  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
-        axis.text.y = element_text(size = 14),
-        axis.title.x = element_text(size = 16),
-        axis.title.y = element_text(size = 16),
-        legend.text = element_text(size = 14),
-        legend.title = element_text(size = 16),
-        plot.title = element_text(size = 18))
+  theme(axis.text.x = element_text(size = 20, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 20),
+        axis.title.x = element_text(size = 22),
+        axis.title.y = element_text(size = 22),
+        legend.text = element_text(size = 20),
+        legend.title = element_text(size = 22))
 
 bar_repro95_phase
 
 ggsave(filename = "bar_acuteHQ95_repro_phase_OG.png", device = "png", plot = bar_repro95_phase, path = "~/CO_CRA/CO_CRA/Output/", width = 7, height = 10)
 
 ```
+
 
 #stacked bar plot of chemical-specific HQs for neurological effects for each phase (95th percentile) for O&G only
 ```{r}
@@ -499,21 +504,20 @@ HQ95_neuro = HQ95 %>%
 #make stacked bar plot 
 bar_neuro95_phase = ggplot(HQ95_neuro, aes(x = Phase, y = average_HQ, fill = Chemical)) +
   geom_bar(stat = "identity", position = "stack") +
-  scale_fill_manual(values = chemical_colors) +  # Use custom colors from RColorBrewer palette
+  scale_fill_manual(values = chemical_colors,
+                     labels = c("Aliphatic_low" = "Aliphatic Low", "Aromatic_medium" = "Aromatic Medium", "n.Nonane" = "n-Nonane")) +  # Use custom colors from RColorBrewer palette; rename part of legend
   theme_bw() +
-  labs(title = "Acute Neurological HQs - 95th Perc. Chemical Conc.", 
-       x = "Phase", 
+  labs(x = "Phase", 
        y = "Average HQ", 
-       fill = "Chemical") +
+       fill = "Chemical(s)") +
   geom_hline(yintercept = 1, linetype = "dashed") +
   scale_x_discrete(labels = c("pre" = "Well Completions", "prod" = "Production")) +
-  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
-        axis.text.y = element_text(size = 14),
-        axis.title.x = element_text(size = 16),
-        axis.title.y = element_text(size = 16),
-        legend.text = element_text(size = 14),
-        legend.title = element_text(size = 16),
-        plot.title = element_text(size = 18))
+  theme(axis.text.x = element_text(size = 20, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 20),
+        axis.title.x = element_text(size = 22),
+        axis.title.y = element_text(size = 22),
+        legend.text = element_text(size = 20),
+        legend.title = element_text(size = 22))
 
 bar_neuro95_phase
 
@@ -539,19 +543,17 @@ bar_hep95_phase = ggplot(HQ95_hep, aes(x = Phase, y = average_HQ, fill = Chemica
   geom_bar(stat = "identity", position = "stack") +
   scale_fill_manual(values = chemical_colors) +  # Use custom colors from RColorBrewer palette
   theme_bw() +
-  labs(title = "Acute Hepatic HQs for NW - 95th Perc. Chemical Conc.", 
-       x = "Phase", 
+  labs(x = "Phase", 
        y = "Average HQ", 
-       fill = "Chemical") +
+       fill = "Chemical(s)") +
   geom_hline(yintercept = 1, linetype = "dashed") +
   scale_x_discrete(labels = c("pre" = "Well Completions", "prod" = "Production")) +
-  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
-        axis.text.y = element_text(size = 14),
-        axis.title.x = element_text(size = 16),
-        axis.title.y = element_text(size = 16),
-        legend.text = element_text(size = 14),
-        legend.title = element_text(size = 16),
-        plot.title = element_text(size = 18))
+  theme(axis.text.x = element_text(size = 20, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 20),
+        axis.title.x = element_text(size = 22),
+        axis.title.y = element_text(size = 22),
+        legend.text = element_text(size = 20),
+        legend.title = element_text(size = 22))
 
 bar_hep95_phase
 
@@ -565,7 +567,16 @@ ggsave(filename = "bar_acuteHQ95_hep_phase_NW.png", device = "png", plot = bar_h
 
 ### stacked bar plots by phase for Anthem ### 
 
+#get raw avg HQs for every phase and endpoint for O&G sites for reporting
+```{r}
+HQ95_avg_anthem = HQ95 %>%
+  filter(Sampling.Site == "Anthem") %>%
+  group_by(Phase, Chemical, Endpoint) %>%
+  summarize(average_HQ = mean(HQ, na.rm = TRUE)) %>%
+  ungroup()
 
+write.csv(HQ95_avg_anthem, file = "~/CO_CRA/CO_CRA/Output/HQ95_avg_phasechem_comm.csv")
+```
 
 
 #stacked bar plot of chemical-specific HQs for immunological effects for each phase (95th percentile) for Anthem
@@ -581,19 +592,17 @@ bar_immuno95_phase_anthem = ggplot(HQ95_immuno_anthem, aes(x = Phase, y = HQ, fi
   geom_bar(stat = "identity", position = "stack") +
   scale_fill_manual(values = chemical_colors) +  # Use custom colors from RColorBrewer palette
   theme_bw() +
-  labs(title = "Acute Immunological HQs (Anthem) - 95th Perc. Chemical Conc.", 
-       x = "Phase of Nearby Pad", 
+  labs(x = "Phase of Nearby Pad", 
        y = "HQ", 
-       fill = "Chemical") +
+       fill = "Chemical(s)") +
   geom_hline(yintercept = 1, linetype = "dashed") +
   scale_x_discrete(labels = c("pre" = "Well Completions", "prod" = "Production")) +
-  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
-        axis.text.y = element_text(size = 14),
-        axis.title.x = element_text(size = 16),
-        axis.title.y = element_text(size = 16),
-        legend.text = element_text(size = 14),
-        legend.title = element_text(size = 16),
-        plot.title = element_text(size = 18))
+  theme(axis.text.x = element_text(size = 20, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 20),
+        axis.title.x = element_text(size = 22),
+        axis.title.y = element_text(size = 22),
+        legend.text = element_text(size = 20),
+        legend.title = element_text(size = 22))
 
 bar_immuno95_phase_anthem
 
@@ -614,19 +623,17 @@ bar_resp95_phase_anthem = ggplot(HQ95_resp_anthem, aes(x = Phase, y = HQ, fill =
   geom_bar(stat = "identity", position = "stack") +
   scale_fill_manual(values = chemical_colors) +  # Use custom colors from RColorBrewer palette
   theme_bw() +
-  labs(title = "Acute Respiratory HQs (Anthem) - 95th Perc. Chemical Conc.", 
-       x = "Phase of Nearby Pad", 
+  labs(x = "Phase of Nearby Pad", 
        y = "HQ", 
-       fill = "Chemical") +
+       fill = "Chemical(s)") +
   geom_hline(yintercept = 1, linetype = "dashed") +
   scale_x_discrete(labels = c("pre" = "Well Completions", "prod" = "Production")) +
-  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
-        axis.text.y = element_text(size = 14),
-        axis.title.x = element_text(size = 16),
-        axis.title.y = element_text(size = 16),
-        legend.text = element_text(size = 14),
-        legend.title = element_text(size = 16),
-        plot.title = element_text(size = 18))
+  theme(axis.text.x = element_text(size = 20, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 20),
+        axis.title.x = element_text(size = 22),
+        axis.title.y = element_text(size = 22),
+        legend.text = element_text(size = 20),
+        legend.title = element_text(size = 22))
 
 bar_resp95_phase_anthem
 
@@ -645,21 +652,20 @@ HQ95_dev_anthem = HQ95 %>%
 #make stacked bar plot 
 bar_dev95_phase_anthem = ggplot(HQ95_dev_anthem, aes(x = Phase, y = HQ, fill = Chemical)) +
   geom_bar(stat = "identity", position = "stack") +
-  scale_fill_manual(values = chemical_colors) +  # Use custom colors from RColorBrewer palette
+  scale_fill_manual(values = chemical_colors,
+                     labels = c("Aliphatic_low" = "Aliphatic Low")) +  # Use custom colors from RColorBrewer palette; rename part of legend
   theme_bw() +
-  labs(title = "Acute Developmental HQs (Anthem) - 95th Perc. Chemical Conc.", 
-       x = "Phase of Nearby Pad", 
+  labs(x = "Phase of Nearby Pad", 
        y = "HQ", 
-       fill = "Chemical") +
+       fill = "Chemical(s)") +
   geom_hline(yintercept = 1, linetype = "dashed") +
   scale_x_discrete(labels = c("pre" = "Well Completions", "prod" = "Production")) +
-  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
-        axis.text.y = element_text(size = 14),
-        axis.title.x = element_text(size = 16),
-        axis.title.y = element_text(size = 16),
-        legend.text = element_text(size = 14),
-        legend.title = element_text(size = 16),
-        plot.title = element_text(size = 18))
+  theme(axis.text.x = element_text(size = 20, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 20),
+        axis.title.x = element_text(size = 22),
+        axis.title.y = element_text(size = 22),
+        legend.text = element_text(size = 20),
+        legend.title = element_text(size = 22))
 
 bar_dev95_phase_anthem
 

@@ -59,21 +59,19 @@ heat_HI50_VOCs = ggplot(HI50_VOCs, aes(x = Sampling.Site, y = Endpoint, fill = H
                 xmax = as.numeric(Sampling.Site) + 0.5, 
                 ymin = as.numeric(Endpoint) - 0.5, 
                 ymax = as.numeric(Endpoint) + 0.5), 
-            fill = NA, color = "black", size = 1) +
+            fill = NA, color = "red", size = 2) +
   geom_tile(color = "black", fill = NA, size = 0.2) +
   scale_fill_gradientn(colors = brewer.pal(9, "YlGnBu")) +
   theme_bw() +
-  labs(title = "Chronic Hazard Indices - VOCs only (Median Chemical Conc.)",
-       x = "Site",
+  labs(x = "Site",
        y = "Endpoint",
        fill = "HI") +
-    theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
-        axis.text.y = element_text(size = 14),
-        axis.title.x = element_text(size = 16),
-        axis.title.y = element_text(size = 16),
-        legend.text = element_text(size = 14),
-        legend.title = element_text(size = 16),
-        plot.title = element_text(size = 18))
+    theme(axis.text.x = element_text(size = 20, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 20),
+        axis.title.x = element_text(size = 22),
+        axis.title.y = element_text(size = 22),
+        legend.text = element_text(size = 20),
+        legend.title = element_text(size = 22))
 
 
 heat_HI50_VOCs
@@ -102,21 +100,19 @@ heat_HI95_VOCs = ggplot(HI95_VOCs, aes(x = Sampling.Site, y = Endpoint, fill = H
                 xmax = as.numeric(Sampling.Site) + 0.5, 
                 ymin = as.numeric(Endpoint) - 0.5, 
                 ymax = as.numeric(Endpoint) + 0.5), 
-            fill = NA, color = "black", size = 1) +
+            fill = NA, color = "red", size = 2) +
   geom_tile(color = "black", fill = NA, size = 0.2) +
   scale_fill_gradientn(colors = brewer.pal(9, "YlGnBu")) +
   theme_bw() +
-  labs(title = "Chronic Hazard Indices - VOCs only (95th Perc. Chemical Conc.)",
-       x = "Site",
+  labs(x = "Site",
        y = "Endpoint",
        fill = "HI") +
-    theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
-        axis.text.y = element_text(size = 14),
-        axis.title.x = element_text(size = 16),
-        axis.title.y = element_text(size = 16),
-        legend.text = element_text(size = 14),
-        legend.title = element_text(size = 16),
-        plot.title = element_text(size = 18))
+    theme(axis.text.x = element_text(size = 20, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 20),
+        axis.title.x = element_text(size = 22),
+        axis.title.y = element_text(size = 22),
+        legend.text = element_text(size = 20),
+        legend.title = element_text(size = 22))
 
 
 heat_HI95_VOCs
@@ -150,21 +146,19 @@ heat_HI50 = ggplot(HI50, aes(x = Sampling.Site, y = Endpoint, fill = HI)) +
                 xmax = as.numeric(Sampling.Site) + 0.5, 
                 ymin = as.numeric(Endpoint) - 0.5, 
                 ymax = as.numeric(Endpoint) + 0.5), 
-            fill = NA, color = "black", size = 1) +
+            fill = NA, color = "red", size = 2) +
   geom_tile(color = "black", fill = NA, size = 0.2) +
   scale_fill_gradientn(colors = brewer.pal(9, "YlGnBu")) +
   theme_bw() +
-  labs(title = "Chronic Hazard Indices (Median Chemical Conc.)",
-       x = "Site",
+  labs(x = "Site",
        y = "Endpoint",
        fill = "HI") +
-    theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
-        axis.text.y = element_text(size = 14),
-        axis.title.x = element_text(size = 16),
-        axis.title.y = element_text(size = 16),
-        legend.text = element_text(size = 14),
-        legend.title = element_text(size = 16),
-        plot.title = element_text(size = 18))
+    theme(axis.text.x = element_text(size = 20, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 20),
+        axis.title.x = element_text(size = 22),
+        axis.title.y = element_text(size = 22),
+        legend.text = element_text(size = 20),
+        legend.title = element_text(size = 22))
 
 
 heat_HI50
@@ -193,21 +187,19 @@ heat_HI95 = ggplot(HI95, aes(x = Sampling.Site, y = Endpoint, fill = HI)) +
                 xmax = as.numeric(Sampling.Site) + 0.5, 
                 ymin = as.numeric(Endpoint) - 0.5, 
                 ymax = as.numeric(Endpoint) + 0.5), 
-            fill = NA, color = "black", size = 1) +
+            fill = NA, color = "red", size = 2) +
   geom_tile(color = "black", fill = NA, size = 0.2) +
   scale_fill_gradientn(colors = brewer.pal(9, "YlGnBu")) +
   theme_bw() +
-  labs(title = "Chronic Hazard Indices (95th Perc. Chemical Conc.)",
-       x = "Site",
+  labs(x = "Site",
        y = "Endpoint",
        fill = "HI") +
-    theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
-        axis.text.y = element_text(size = 14),
-        axis.title.x = element_text(size = 16),
-        axis.title.y = element_text(size = 16),
-        legend.text = element_text(size = 14),
-        legend.title = element_text(size = 16),
-        plot.title = element_text(size = 18))
+    theme(axis.text.x = element_text(size = 20, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 20),
+        axis.title.x = element_text(size = 22),
+        axis.title.y = element_text(size = 22),
+        legend.text = element_text(size = 20),
+        legend.title = element_text(size = 22))
 
 
 heat_HI95
@@ -256,19 +248,17 @@ bar_cancer50 = ggplot(cancer50, aes(x = Sampling.Site, y = Ind_Risk, fill = Chem
   scale_y_continuous(breaks = c(1e-6, 5e-5, 1e-4, 1.5e-4, 2e-4),
                      labels = label_scientific(digits = 1),  # Use label_scientific to format y-axis labels
                      expand = c(0, 0)) +  # Make bars flush with the x-axis
-  labs(title = "Cancer Risk - Median Chemical Conc.", 
-       x = "Site", 
+  labs(x = "Site", 
        y = "Cancer Risk", 
        fill = "Chemical") +
   geom_hline(yintercept = 0.0001, linetype = "dashed") +
   geom_hline(yintercept = 0.000001, linetype = "dashed") +
-  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
-        axis.text.y = element_text(size = 14),
-        axis.title.x = element_text(size = 16),
-        axis.title.y = element_text(size = 16),
-        legend.text = element_text(size = 14),
-        legend.title = element_text(size = 16),
-        plot.title = element_text(size = 18))
+  theme(axis.text.x = element_text(size = 20, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 20),
+        axis.title.x = element_text(size = 22),
+        axis.title.y = element_text(size = 22),
+        legend.text = element_text(size = 20),
+        legend.title = element_text(size = 22))
 
 
 
@@ -308,19 +298,17 @@ bar_cancer95 = ggplot(cancer95, aes(x = Sampling.Site, y = Ind_Risk, fill = Chem
   scale_y_continuous(breaks = c(1e-6, 5e-5, 1e-4, 1.5e-4, 2e-4, 2.5e-4, 3e-4),
                      labels = label_scientific(digits = 1),  # Use label_scientific to format y-axis labels
                      expand = c(0, 0)) +  # Make bars flush with the x-axis
-  labs(title = "Cancer Risk - Median Chemical Conc.", 
-       x = "Site", 
+  labs(x = "Site", 
        y = "Cancer Risk", 
        fill = "Chemical") +
   geom_hline(yintercept = 0.0001, linetype = "dashed") +
   geom_hline(yintercept = 0.000001, linetype = "dashed") +
-  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
-        axis.text.y = element_text(size = 14),
-        axis.title.x = element_text(size = 16),
-        axis.title.y = element_text(size = 16),
-        legend.text = element_text(size = 14),
-        legend.title = element_text(size = 16),
-        plot.title = element_text(size = 18))
+  theme(axis.text.x = element_text(size = 20, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 20),
+        axis.title.x = element_text(size = 22),
+        axis.title.y = element_text(size = 22),
+        legend.text = element_text(size = 20),
+        legend.title = element_text(size = 22))
 
 bar_cancer95
 

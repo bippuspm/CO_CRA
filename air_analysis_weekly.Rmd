@@ -7,6 +7,9 @@ output: html_document
 
 #load libraries and data
 ```{r}
+library("multcompView")
+library("multcomp")
+library("nlme")
 library("dplyr")
 library("bigrquery")
 library("DBI")
@@ -21,6 +24,11 @@ library("car")
 library("janitor")
 library("dunn.test")
 library("sf")
+library("tidyverse")
+library("ggthemes")
+library("lme4")
+library("lmerTest")
+library("emmeans")
 detach(package:Rmisc)
 detach(package:plyr)
 
@@ -64,7 +72,7 @@ all$Aliphatic_low = all$n.Octane + all$i.Pentane + all$n.Pentane + all$trans.2.P
 all$Aromatic_medium = all$i.Propylbenzene + all$n.Propylbenzene + all$X3.Ethyltoluene + all$X4.Ethyltoluene + all$X1.3.5.Trimethylbenzene + all$X2.Ethyltoluene + all$X1.2.4.Trimethylbenzene + all$X1.2.3.Trimethylbenzene + all$X1.3.Diethylbenzene + all$X1.4.Diethylbenzene
 
 all_clean = all %>%
-  select(Sampling.Site, Phase, Mud, Benzene, Toluene, Ethylbenzene, Xylenes, n.Octane, n.Nonane, n.Decane, Aliphatic_low, Aromatic_medium, Styrene, TCE, PCE, Propene)
+  dplyr::select(Sampling.Site, Phase, Mud, Benzene, Toluene, Ethylbenzene, Xylenes, n.Octane, n.Nonane, n.Decane, Aliphatic_low, Aromatic_medium, Styrene, TCE, PCE, Propene)
 
 #transform to long for graphing and analysis
 all_long = all_clean %>%
@@ -77,8 +85,63 @@ all_long$Phase = factor(all_long$Phase, levels = c("drilling", "pre", "prod", "n
 
 all_long$Chemical = factor(all_long$Chemical, levels = c("Benzene", "Toluene", "Ethylbenzene", "Xylenes", "Styrene", "n.Nonane", "n.Decane",  "TCE", "PCE", "Propene", "Aliphatic_low", "Aromatic_medium"))
 
+```
+
+
+#look at concentrations of chemicals we're interested in at different months to see if there's seasonality
+```{r}
+all_months = all %>%
+  pivot_longer(cols = c("Benzene", "Toluene", "Ethylbenzene", "Xylenes", "n.Nonane", "n.Decane", "Aliphatic_low", "Aromatic_medium", "Styrene", "TCE", "PCE", "Propene"), names_to = "Chemical", values_to = "Value") %>%
+  dplyr::select(Sampling.Site, Phase, Mud, Start.Date.Time, Stop.Date.Time, Chemical, Value) %>%
+    mutate(Start.Date = as.Date(Start.Date.Time),
+         Stop.Date = as.Date(Stop.Date.Time),
+         Start.Month = format(Start.Date, "%m"),
+         Stop.Month = format(Stop.Date, "%m"))
+
+
+# Create a column for each month where the value is included
+all_months_long <- all_months %>%
+  rowwise() %>%
+  mutate(Months.Included = list(unique(c(Start.Month, Stop.Month)))) %>%
+  unnest(cols = c(Months.Included)) %>%
+  rename(Month = Months.Included)
+
+
+# Calculate mean and standard deviation for each chemical and month
+chemical_month_summary <- all_months_long %>%
+  dplyr::group_by(Chemical, Month) %>%
+  summarize(
+    Mean = mean(Value, na.rm = TRUE),
+    SD = sd(Value, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    Lower = Mean - SD,
+    Upper = Mean + SD
+  )
+
+# Plot with error bars
+chems_months <- ggplot(chemical_month_summary, aes(x = Month, y = Mean, group = Chemical)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(aes(ymin = Lower, ymax = Upper), width = 0.2) +
+  scale_x_discrete(limits = sprintf("%02d", 1:12), labels = month.abb) +
+  labs(
+    x = "Month",
+    y = "Value",
+    color = "Chemical"
+  ) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  facet_wrap(~ Chemical, scales = "free_y")
+
+chems_months
+
+
+ggsave(filename = "chems_months_weekly.png", device = "png", plot = chems_months, path = "~/CO_CRA/CO_CRA/Output/Air_Data/", width = 15, height = 12)
 
 ```
+
 
 
 
@@ -87,43 +150,84 @@ all_long$Chemical = factor(all_long$Chemical, levels = c("Benzene", "Toluene", "
 ```{r}
 #select data for pad locations only and commons only
 pads = all_long %>%
-  filter(Sampling.Site == "Interchange A" | Sampling.Site == "Interchange B" | Sampling.Site == "Livingston" | Sampling.Site == "Northwest A" | Sampling.Site == "Northwest B" | Sampling.Site == "United")
+  filter(Sampling.Site == "Interchange A" | Sampling.Site == "Interchange B" | Sampling.Site == "Livingston" | Sampling.Site == "Northwest A" | Sampling.Site == "Northwest B" | Sampling.Site == "United") %>%
+  filter(Chemical == "Benzene" | Chemical == "Toluene" | Chemical == "Ethylbenzene" | Chemical == "Xylenes" | Chemical == "n.Nonane" | Chemical == "Aliphatic_low")
 
 pads$Phase <- factor(pads$Phase, levels = c("drilling", "pre", "prod"))
 
+
 commons_long = all_long %>%
-  filter(Sampling.Site == "Commons")
+  filter(Sampling.Site == "Commons") %>%
+  filter(Chemical == "Benzene" | Chemical == "Toluene" | Chemical == "Ethylbenzene" | Chemical == "Xylenes" | Chemical == "n.Nonane" | Chemical == "Aliphatic_low")
 
 commons_long$Phase = "Commons"
 
 # Combine the pads and commons_long dataframes
 combined_data <- rbind(pads, commons_long)
 
-#all sites, faceted by chemical, with phases on the x axis
 
-VOCs_violin_pads_commons = ggplot(combined_data, aes(x = Phase, y = Value, fill = Phase)) +
-  geom_violin(trim = FALSE) +
+# custom labels for labeling statistics
+custom_labels <- data.frame(
+  Phase = rep(c("drilling", "pre", "prod", "Commons"), times = 12),
+  Value = c(
+    # Benzene
+    0.9, 0.9, 0.6, 0.6,
+    # Toluene
+    3, 4, 8.5, 3,
+    # Ethylbenzene
+    0.3, 0.2, 0.15, 0.2,
+    # Xylenes
+    1.7, 1.6, 1, 1,
+    # n-Nonane
+    2.5, 1, 1, 1,
+    # Aliphatic Low
+    35, 40, 28, 15
+  ),
+  Text = c(
+    # Benzene
+    "a", "b", "c", "a,b,c",
+    # Toluene
+    "a", "b", "c", "a,b,c",
+    # Ethylbenzene
+    "a", "b", "c", "a,b,c",
+    # Xylenes
+    "a", "b", "c", "b,c",
+    # n-Nonane
+    "a", "b", "c", "b,c",
+    # Aliphatic Low
+    "a", "b", "c", "b,c"
+  ),
+  Chemical = rep(c(
+    "Benzene", "Toluene", "Ethylbenzene", "Xylenes", "n.Nonane", "Aliphatic_low"
+  ), each = 4)
+)
+
+
+# Create the plot
+VOCs_violin_pads_commons <- ggplot(combined_data, aes(x = Phase, y = Value, fill = Phase)) +
+  geom_violin(trim = FALSE) +   
+  facet_wrap(~ Chemical, scales = "free", ncol = 3, nrow = 2, labeller = labeller(Chemical = c("Aliphatic_low" = "Aliphatic Low", "n.Nonane" = "n-Nonane"))) +
+  geom_text(data = custom_labels, aes(label = Text), size = 7, vjust = -0.5) +  
   theme_bw() +
   ylab("Concentration (ppbv)") +
   xlab("Phase") +
-  stat_summary(fun = median, geom = "point", shape = 20, size = 1.8, color = "black", fill = "gray") +
-  facet_wrap(~ Chemical, scales = "free", ncol = 4, nrow = 3) +
+  stat_summary(fun = median, geom = "point", shape = 20, size = 3, color = "black", fill = "gray") +
   scale_fill_manual(values = c("Drilling" = "black", "Pre" = "black", "Prod" = "black", "Commons" = "royalblue")) +
   scale_x_discrete(labels = c("drilling" = "Drilling", "pre" = "Well Completions", "prod" = "Production", "Commons" = "Background")) +
+  scale_y_continuous(expand = expansion(mult = c(0.01, 0.25))) + # Add space above the plot
   theme(legend.position = "none",
-        strip.text = element_text(size = 14)) +
-  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
-        axis.text.y = element_text(size = 14),
-        axis.title.x = element_text(size = 16),
-        axis.title.y = element_text(size = 16),
-        legend.text = element_text(size = 14),
-        legend.title = element_text(size = 16),
-        plot.title = element_text(size = 18))
+        strip.text = element_text(size = 18)) +
+  theme(axis.text.x = element_text(size = 18, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 18),
+        axis.title.x = element_text(size = 20),
+        axis.title.y = element_text(size = 20),
+        legend.text = element_text(size = 18),
+        legend.title = element_text(size = 20))
+
 
 VOCs_violin_pads_commons
 
-ggsave(filename = "pads_commons_violin.png", device = "png", plot = VOCs_violin_pads_commons, path = "~/CO_CRA/CO_CRA/Output/Air_Data/", width = 13, height = 10)
-
+ggsave(filename = "pads_commons_violin.png", device = "png", plot = VOCs_violin_pads_commons, path = "~/CO_CRA/CO_CRA/Output/Air_Data/", width = 12, height = 9)
 ```
 
 
@@ -132,68 +236,72 @@ ggsave(filename = "pads_commons_violin.png", device = "png", plot = VOCs_violin_
 ```{r}
 #select data for community locations only
 comm = all_long %>%
-  filter(Sampling.Site == "Anthem" | Sampling.Site == "Wildgrass")
+  filter(Sampling.Site == "Anthem" | Sampling.Site == "Wildgrass") %>%
+  filter(Chemical == "Benzene" | Chemical == "Toluene" | Chemical == "Ethylbenzene" | Chemical == "Xylenes" | Chemical == "n.Nonane" | Chemical == "Aliphatic_low")
 
-#all sites, faceted by chemical, with phases on the x axis
 
-VOCs_violin_comm = ggplot(comm, aes(x = Phase, y = Value)) + geom_violin(trim = FALSE) + theme_bw() + ylab("Concentration (ppb)") + xlab("Phase") + theme(axis.text.x = element_text(size = 10, angle = 45, hjust = 1)) + stat_summary(fun = mean, geom = "point", shape = 20, size = 1, color = "black", fill = "gray") + facet_wrap(~ Chemical, scales = "free") + scale_x_discrete(labels = c("drilling" = "Drilling", "pre" = "Pre-prod.", "prod" = "Prod.", "none" = "None"))
 
-VOCs_violin_comm = ggplot(comm, aes(x = Phase, y = Value)) +
-  geom_violin(trim = FALSE, fill = "gray50") +
+# custom labels for labeling statistics
+custom_labels <- data.frame(
+  Phase = rep(c("drilling", "pre", "prod", "none"), times = 12),
+  Value = c(
+    # Benzene
+    0.5, 0.5, 0.5, 0.4,
+    # Toluene
+    1.5, 1, 1, 2,
+    # Ethylbenzene
+    0.25, 0.1, 0.1, 0.1,
+    # Xylenes
+    1.2, 0.4, 0.4, 0.4,
+    # n-Nonane
+    2.5, 0.5, 0.5, 0.5,
+    # Aliphatic Low
+    18, 13, 7, 7
+  ),
+  Text = c(
+    # Benzene
+    "a", "a,b", "b", "b",
+    # Toluene
+    "a", "b", "b", "b",
+    # Ethylbenzene
+    "a", "b", "b", "b",
+    # Xylenes
+    "a", "b", "b", "b",
+    # n-Nonane
+    "a", "b", "b", "b",
+    # Aliphatic Low
+    "a", "b", "c", "b,c"
+  ),
+  Chemical = rep(c(
+    "Benzene", "Toluene", "Ethylbenzene", "Xylenes", "n.Nonane","Aliphatic_low"
+  ), each = 4)
+)
+
+
+# Create the plot
+VOCs_violin_comm <- ggplot(comm, aes(x = Phase, y = Value, fill = Phase)) +
+  geom_violin(trim = FALSE, fill = "gray50") +   
+  facet_wrap(~ Chemical, scales = "free", ncol = 3, nrow = 2, labeller = labeller(Chemical = c("Aliphatic_low" = "Aliphatic Low", "n.Nonane" = "n-Nonane"))) +
+  geom_text(data = custom_labels, aes(label = Text), size = 6, vjust = -0.5) +  
   theme_bw() +
   ylab("Concentration (ppbv)") +
   xlab("Phase") +
-  stat_summary(fun = median, geom = "point", shape = 20, size = 1.8, color = "black", fill = "gray") +
-  facet_wrap(~ Chemical, scales = "free", ncol = 4, nrow = 3) +
+  stat_summary(fun = median, geom = "point", shape = 20, size = 3, color = "black", fill = "gray") +
   scale_x_discrete(labels = c("drilling" = "Drilling", "pre" = "Well Completions", "prod" = "Production", "none" = "None")) +
+  scale_y_continuous(expand = expansion(mult = c(0.01, 0.35))) + # Add space above the plot
   theme(legend.position = "none",
         strip.text = element_text(size = 14)) +
-  theme(axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
-        axis.text.y = element_text(size = 14),
+  theme(axis.text.x = element_text(size = 16, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 16),
         axis.title.x = element_text(size = 16),
-        axis.title.y = element_text(size = 16),
-        legend.text = element_text(size = 14),
-        legend.title = element_text(size = 16),
-        plot.title = element_text(size = 18))
+        axis.title.y = element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.title = element_text(size = 18))
 
 VOCs_violin_comm
 
-ggsave(filename = "comm_violin.png", device = "png", plot = VOCs_violin_comm, path = "~/CO_CRA/CO_CRA/Output/Air_Data/", width = 10, height = 10)
+ggsave(filename = "comm_violin.png", device = "png", plot = VOCs_violin_comm, path = "~/CO_CRA/CO_CRA/Output/Air_Data/", width = 12, height = 9)
 
-```
-
-
-
-
-#violin plots for mud on the x axis (highlighting differences between muds different chemicals) for O&G sites
-
-```{r}
-#remove NAs for mud and only look at O&G sites
-mud_only = all_long %>%
-  filter(Mud == "neoflow" | Mud == "gibson") %>%
-   filter(Sampling.Site == "Interchange A" | Sampling.Site == "Interchange B" | Sampling.Site == "Livingston" | Sampling.Site == "Northwest A" | Sampling.Site == "Northwest B" | Sampling.Site == "United")
-
-mud_violin = ggplot(mud_only, aes(x = Mud, y = Value)) +
-  geom_violin(trim = FALSE, fill = "gray50") +
-  theme_bw() +
-  ylab("Concentration (ppbv)") +
-  xlab("Drill Mud") +
-  stat_summary(fun = median, geom = "point", shape = 20, size = 1.8, color = "black", fill = "gray") +
-  facet_wrap(~ Chemical, scales = "free", ncol = 4, nrow = 3) +
-  scale_x_discrete(labels = c("neoflow" = "Neoflo", "gibson" = "Gibson")) +
-  theme(legend.position = "none",
-        strip.text = element_text(size = 14),
-        axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
-        axis.text.y = element_text(size = 14),
-        axis.title.x = element_text(size = 16),
-        axis.title.y = element_text(size = 16),
-        legend.text = element_text(size = 14),
-        legend.title = element_text(size = 16),
-        plot.title = element_text(size = 18))
-
-mud_violin
-
-ggsave(filename = "mud_violin.png", device = "png", plot = mud_violin, path = "~/CO_CRA/CO_CRA/Output/Air_Data/", width = 13, height = 10)
 ```
 
 
@@ -201,44 +309,65 @@ ggsave(filename = "mud_violin.png", device = "png", plot = mud_violin, path = "~
 ```{r}
 mud_only = all_long %>%
   filter(Mud == "neoflow" | Mud == "gibson") %>%
-   filter(Sampling.Site == "Interchange A" | Sampling.Site == "Interchange B" | Sampling.Site == "Livingston" | Sampling.Site == "Northwest A" | Sampling.Site == "Northwest B" | Sampling.Site == "United")
+   filter(Sampling.Site == "Interchange A" | Sampling.Site == "Interchange B" | Sampling.Site == "Livingston" | Sampling.Site == "Northwest A" | Sampling.Site == "Northwest B" | Sampling.Site == "United") %>%
+  filter(Chemical == "Benzene" | Chemical == "Toluene" | Chemical == "Ethylbenzene" | Chemical == "Xylenes" | Chemical == "n.Nonane" | Chemical == "Aliphatic_low")
 
 medians <- mud_only %>%
   group_by(Chemical, Mud) %>%
   summarize(median_value = median(Value, na.rm = TRUE), .groups = 'drop')
 
-mud_dotplot <- ggplot(mud_only, aes(x = Mud, y = Value, fill = Sampling.Site)) +
-  geom_dotplot(binaxis = 'y', stackdir = 'center', dotsize = 0.7, stroke = 0) +  # Make the outline the same color as the fill
-  scale_fill_manual(values = c("Interchange A" = "blue", "Interchange B" = "green", "Livingston" = "red", "Northwest A" = "orange", "Northwest B" = "violet", "United" = "yellow")) +  # Customize colors
-  geom_crossbar(data = medians, aes(x = Mud, y = median_value, ymin = median_value, ymax = median_value), inherit.aes = FALSE, color = "black", width = 0.5) +  # Add black line for median
+
+# Ensure the 'Chemical' variable is a factor and ordered alphabetically
+mud_only$Chemical = factor(mud_only$Chemical, levels = c("Aliphatic_low", "Benzene", "Ethylbenzene","n.Nonane", "Toluene", "Xylenes"))
+
+# Create the plot
+
+mud_dotplot <- ggplot(mud_only, aes(x = Mud, y = Value, fill = Sampling.Site, shape = Sampling.Site)) +
+  geom_point(position = position_jitter(width = 0.2, height = 0), size = 3, stroke = 0) +
+  scale_fill_manual(values = c("Interchange A" = "blue", "Interchange B" = "green", "Livingston" = "red", 
+                               "Northwest A" = "orange", "Northwest B" = "violet", "United" = "yellow")) +  
+  scale_shape_manual(values = c(21, 22, 23, 24, 25, 8)) +  # Different shapes for each site
+  geom_crossbar(data = medians, aes(x = Mud, y = median_value, ymin = median_value, ymax = median_value), 
+                inherit.aes = FALSE, color = "black", width = 0.5) +  
   theme_bw() +
   ylab("Concentration (ppbv)") +
   xlab("Drill Mud") +
-  facet_wrap(~ Chemical, scales = "free", ncol = 4, nrow = 3) +
+  labs(fill = "Sampling Site", shape = "Sampling Site") +
+  facet_wrap(~ Chemical, scales = "free", ncol = 3, nrow = 2, 
+             labeller = labeller(Chemical = c("Aliphatic_low" = "Aliphatic Low",
+                                              "n.Nonane" = "n-Nonane"))) +
   scale_x_discrete(labels = c("neoflow" = "Neoflo", "gibson" = "Gibson")) +
+  scale_y_continuous(expand = expansion(mult = c(0.01, 0.2))) + 
   theme(legend.position = "right",
-        strip.text = element_text(size = 14),
-        axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
-        axis.text.y = element_text(size = 14),
-        axis.title.x = element_text(size = 16),
-        axis.title.y = element_text(size = 16),
-        legend.text = element_text(size = 14),
-        legend.title = element_text(size = 16),
-        plot.title = element_text(size = 18))
+        strip.text = element_text(size = 16),
+        axis.text.x = element_text(size = 18, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 18),
+        axis.title.x = element_text(size = 20),
+        axis.title.y = element_text(size = 20),
+        legend.text = element_text(size = 16),
+        legend.title = element_text(size = 18))
+
+
 
 mud_dotplot
 
-ggsave(filename = "mud_dotplot.png", device = "png", plot = mud_dotplot, path = "~/CO_CRA/CO_CRA/Output/Air_Data/", width = 13, height = 10)
+ggsave(filename = "mud_dotplot.png", device = "png", plot = mud_dotplot, path = "~/CO_CRA/CO_CRA/Output/Air_Data/", width = 12, height = 9)
+
+#get median values for each mud to report in table
+medians <- all_long %>%
+  filter(Mud == "neoflow" | Mud == "gibson") %>%
+   filter(Sampling.Site == "Interchange A" | Sampling.Site == "Interchange B" | Sampling.Site == "Livingston" | Sampling.Site == "Northwest A" | Sampling.Site == "Northwest B" | Sampling.Site == "United") %>%
+  group_by(Chemical, Mud) %>%
+  summarize(median_value = median(Value, na.rm = TRUE), .groups = 'drop')
+
+
+
 ```
 
 
+### New Statistics - log-normalizing and repeated measures ###
 
-
-
-## Statistics ##
-
-
-## ANOVA per chemical to compare between site and phase for O&G sites
+## linear mixed-effects model with repeated measure error structure per chemical to compare between phase for O&G sites
 
 #benzene
 ```{r}
@@ -246,14 +375,14 @@ ggsave(filename = "mud_dotplot.png", device = "png", plot = mud_dotplot, path = 
 all_clean$Phase[is.na(all_clean$Phase)] = "commons"
 
 ben = all_clean %>%
-  select(Sampling.Site, Phase, Mud, Benzene) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, Benzene) %>%
   filter(Sampling.Site == "Interchange A" | Sampling.Site == "Interchange B" | Sampling.Site == "Livingston" | Sampling.Site == "Northwest A" | Sampling.Site == "Northwest B" | Sampling.Site == "United" | Sampling.Site == "Commons")
 
 ben$Sampling.Site <- as.factor(ben$Sampling.Site)
 ben$Phase <- as.factor(ben$Phase)
 
-#run ANOVA
-ben_anova = aov(Benzene ~ Sampling.Site*Phase, data = ben)
+#run regular anova to see if there's differences between sampling sites at the same phases to justify repeated measures (SIGNIFICANCE HERE)
+ben_anova = aov(Benzene ~ Sampling.Site, data = ben)
 summary(ben_anova)
 
 #Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
@@ -267,16 +396,44 @@ ben$log_Benzene <- log(ben$Benzene)
 hist(ben$log_Benzene)
 leveneTest(log_Benzene ~ Sampling.Site * Phase, data = ben) #reduced by orders of magnitude, so good enough
 
-#re-run ANOVA with transformed values
-ben_anova = aov(log_Benzene ~ Sampling.Site*Phase, data = ben)
-summary(ben_anova)
-capture.output(ben_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/benzene_anova_OG")
+#run rmANOVA with transformed values
+ben_lmer = lmer(log_Benzene ~ Phase + (1|Sampling.Site), data = ben)
+anova(ben_lmer)
+ben_emmeans = emmeans(ben_lmer, list(pairwise ~ Phase), adjust = "bonferroni")
+ben_emmeans
+capture.output(ben_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/benzene_emmeans_OG")
 
-#tukey's post-hoc
-ben_tukey = TukeyHSD(x = ben_anova, conf.level = 0.95)
-capture.output(ben_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/benzene_tukey_OG")
-ben_tukey
+qqnorm(residuals(ben_lmer))
+qqline(residuals(ben_lmer), col=2)
 
+#n for each phase
+phasen_OG <- ben %>%
+  group_by(Phase) %>%
+  summarise(n = n())
+
+write.csv(phasen_OG, file = "~/CO_CRA/CO_CRA/Output/Air_Data/n_byphase_OG.csv")
+
+## get back normalized emmeans for reporting in tables ##
+
+# Extract emmeans for the Phase variable
+phase_emmeans <- emmeans(ben_lmer, ~ Phase)
+
+# Compute pairwise contrasts
+pairwise_phase <- contrast(phase_emmeans, method = "pairwise", adjust = "bonferroni")
+
+# Convert contrasts to a data frame
+pairwise_phase_df <- as.data.frame(pairwise_phase)
+
+# Modify estimates for specific comparisons and back-transform
+pairwise_phase <- pairwise_phase_df %>%
+  mutate(
+    adjusted_estimate = ifelse(
+      contrast %in% c("commons - drilling", "commons - pre", "commons - prod"), 
+      -1 * estimate, 
+      estimate
+    ),
+    original_scale_estimate = 10^(adjusted_estimate)
+  )
 
 ```
 
@@ -285,14 +442,14 @@ ben_tukey
 ```{r}
 #clean data and filter for toluene
 tol = all_clean %>%
-  select(Sampling.Site, Phase, Mud, Toluene) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, Toluene) %>%
   filter(Sampling.Site == "Interchange A" | Sampling.Site == "Interchange B" | Sampling.Site == "Livingston" | Sampling.Site == "Northwest A" | Sampling.Site == "Northwest B" | Sampling.Site == "United" | Sampling.Site == "Commons")
 
 tol$Sampling.Site <- as.factor(tol$Sampling.Site)
 tol$Phase <- as.factor(tol$Phase)
 
-#run ANOVA
-tol_anova = aov(Toluene ~ Sampling.Site*Phase, data = tol)
+#run regular anova to see if there's differences between sampling sites at the same phases to justify repeated measures (SIGNIFICANCE HERE)
+tol_anova = aov(Toluene ~ Sampling.Site, data = tol)
 summary(tol_anova)
 
 #Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
@@ -306,52 +463,100 @@ tol$log_Toluene <- log(tol$Toluene)
 hist(tol$log_Toluene)
 leveneTest(log_Toluene ~ Sampling.Site * Phase, data = tol) #reduced by orders of magnitude, so good enough
 
-#re-run ANOVA with transformed values
-tol_anova = aov(log_Toluene ~ Sampling.Site*Phase, data = tol)
-summary(tol_anova)
-capture.output(tol_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/toluene_anova_OG")
+#run rmANOVA with transformed values
 
-#tukey's post-hoc
-tol_tukey = TukeyHSD(x = tol_anova, conf.level = 0.95)
-capture.output(tol_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/toluene_tukey_OG")
-tol_tukey
+tol_lmer = lmer(log_Toluene ~ Phase + (1|Sampling.Site), data = tol)
+anova(tol_lmer)
+tol_emmeans = emmeans(tol_lmer, list(pairwise ~ Phase), adjust = "bonferroni")
+tol_emmeans
+capture.output(tol_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/toluene_emmeans_OG")
+
+qqnorm(residuals(tol_lmer))
+qqline(residuals(tol_lmer), col=2)
+
+## get back normalized emmeans for reporting in tables ##
+
+# Extract emmeans for the Phase variable
+phase_emmeans <- emmeans(tol_lmer, ~ Phase)
+
+# Compute pairwise contrasts
+pairwise_phase <- contrast(phase_emmeans, method = "pairwise", adjust = "bonferroni")
+
+# Convert contrasts to a data frame
+pairwise_phase_df <- as.data.frame(pairwise_phase)
+
+# Modify estimates for specific comparisons and back-transform
+pairwise_phase <- pairwise_phase_df %>%
+  mutate(
+    adjusted_estimate = ifelse(
+      contrast %in% c("commons - drilling", "commons - pre", "commons - prod"), 
+      -1 * estimate, 
+      estimate
+    ),
+    original_scale_estimate = 10^(adjusted_estimate)
+  )
 ```
+
 
 
 # Ethylbenzene
 ```{r}
 # Clean data and filter for Ethylbenzene
 eb = all_clean %>%
-  select(Sampling.Site, Phase, Mud, Ethylbenzene) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, Ethylbenzene) %>%
   filter(Sampling.Site == "Interchange A" | Sampling.Site == "Interchange B" | Sampling.Site == "Livingston" | Sampling.Site == "Northwest A" | Sampling.Site == "Northwest B" | Sampling.Site == "United" | Sampling.Site == "Commons")
 
 eb$Sampling.Site <- as.factor(eb$Sampling.Site)
 eb$Phase <- as.factor(eb$Phase)
 
-# Run ANOVA
-eb_anova = aov(Ethylbenzene ~ Sampling.Site * Phase, data = eb)
+#run regular anova to see if there's differences between sampling sites at the same phases to justify repeated measures (SIGNIFICANCE HERE)
+eb_anova = aov(Ethylbenzene ~ Sampling.Site, data = eb)
 summary(eb_anova)
 
-# Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
+#Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
 shapiro.test(eb_anova$residuals)
 
-# Levene's Test for homogeneity of variances (p < 0.05, variances are not homogenous)
+#Levene's Test for homogeneity of variances (p < 0.05, variances are not homogenous)
 leveneTest(Ethylbenzene ~ Sampling.Site * Phase, data = eb)
 
-# Log-transform and check distribution with histogram and tests
+#log-transform and check distribution with histogram and tests
 eb$log_Ethylbenzene <- log(eb$Ethylbenzene)
 hist(eb$log_Ethylbenzene)
-leveneTest(log_Ethylbenzene ~ Sampling.Site * Phase, data = eb) # not significant anymore
+leveneTest(log_Ethylbenzene ~ Sampling.Site * Phase, data = eb) #not significant now
 
-# Re-run ANOVA with transformed values
-eb_anova = aov(log_Ethylbenzene ~ Sampling.Site * Phase, data = eb)
-summary(eb_anova)
-capture.output(eb_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/ethylbenzene_anova_OG")
+#run rmANOVA with transformed values
 
-# Tukey's post-hoc
-eb_tukey = TukeyHSD(x = eb_anova, conf.level = 0.95)
-capture.output(eb_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/ethylbenzene_tukey_OG")
-eb_tukey
+eb_lmer = lmer(log_Ethylbenzene ~ Phase + (1|Sampling.Site), data = eb)
+anova(eb_lmer)
+eb_emmeans = emmeans(eb_lmer, list(pairwise ~ Phase), adjust = "bonferroni")
+eb_emmeans
+capture.output(eb_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/ethylbenzene_emmeans_OG")
+
+qqnorm(residuals(eb_lmer))
+qqline(residuals(eb_lmer), col=2)
+
+## get back normalized emmeans for reporting in tables ##
+
+# Extract emmeans for the Phase variable
+phase_emmeans <- emmeans(eb_lmer, ~ Phase)
+
+# Compute pairwise contrasts
+pairwise_phase <- contrast(phase_emmeans, method = "pairwise", adjust = "bonferroni")
+
+# Convert contrasts to a data frame
+pairwise_phase_df <- as.data.frame(pairwise_phase)
+
+# Modify estimates for specific comparisons and back-transform
+pairwise_phase <- pairwise_phase_df %>%
+  mutate(
+    adjusted_estimate = ifelse(
+      contrast %in% c("commons - drilling", "commons - pre", "commons - prod"), 
+      -1 * estimate, 
+      estimate
+    ),
+    original_scale_estimate = 10^(adjusted_estimate)
+  )
+
 ```
 
 
@@ -359,14 +564,14 @@ eb_tukey
 ```{r}
 # Clean data and filter for Xylenes
 xyl = all_clean %>%
-  select(Sampling.Site, Phase, Mud, Xylenes) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, Xylenes) %>%
   filter(Sampling.Site == "Interchange A" | Sampling.Site == "Interchange B" | Sampling.Site == "Livingston" | Sampling.Site == "Northwest A" | Sampling.Site == "Northwest B" | Sampling.Site == "United" | Sampling.Site == "Commons")
 
 xyl$Sampling.Site <- as.factor(xyl$Sampling.Site)
 xyl$Phase <- as.factor(xyl$Phase)
 
-# Run ANOVA
-xyl_anova = aov(Xylenes ~ Sampling.Site * Phase, data = xyl)
+#run regular anova to see if there's differences between sampling sites at the same phases to justify repeated measures (SIGNIFICANCE HERE)
+xyl_anova = aov(Xylenes ~ Sampling.Site, data = xyl)
 summary(xyl_anova)
 
 # Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
@@ -378,17 +583,41 @@ leveneTest(Xylenes ~ Sampling.Site * Phase, data = xyl)
 # Log-transform and check distribution with histogram and tests
 xyl$log_Xylenes <- log(xyl$Xylenes)
 hist(xyl$log_Xylenes)
-leveneTest(log_Xylenes ~ Sampling.Site * Phase, data = xyl) # Reduced by orders of magnitude, so good enough
+leveneTest(log_Xylenes ~ Sampling.Site * Phase, data = xyl) # reduced by orders of magnitude
 
-# Re-run ANOVA with transformed values
-xyl_anova = aov(log_Xylenes ~ Sampling.Site * Phase, data = xyl)
-summary(xyl_anova)
-capture.output(xyl_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/xylenes_anova_OG")
+# run rmANOVA with transformed values
 
-# Tukey's post-hoc
-xyl_tukey = TukeyHSD(x = xyl_anova, conf.level = 0.95)
-capture.output(xyl_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/xylenes_tukey_OG")
-xyl_tukey
+xyl_lmer = lmer(log_Xylenes ~ Phase + (1|Sampling.Site), data = xyl)
+anova(xyl_lmer)
+xyl_emmeans = emmeans(xyl_lmer, list(pairwise ~ Phase), adjust = "bonferroni")
+xyl_emmeans
+capture.output(xyl_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/xylenes_emmeans_OG")
+
+qqnorm(residuals(xyl_lmer))
+qqline(residuals(xyl_lmer), col=2)
+
+## get back normalized emmeans for reporting in tables ##
+
+# Extract emmeans for the Phase variable
+phase_emmeans <- emmeans(xyl_lmer, ~ Phase)
+
+# Compute pairwise contrasts
+pairwise_phase <- contrast(phase_emmeans, method = "pairwise", adjust = "bonferroni")
+
+# Convert contrasts to a data frame
+pairwise_phase_df <- as.data.frame(pairwise_phase)
+
+# Modify estimates for specific comparisons and back-transform
+pairwise_phase <- pairwise_phase_df %>%
+  mutate(
+    adjusted_estimate = ifelse(
+      contrast %in% c("commons - drilling", "commons - pre", "commons - prod"), 
+      -1 * estimate, 
+      estimate
+    ),
+    original_scale_estimate = 10^(adjusted_estimate)
+  )
+
 ```
 
 
@@ -396,14 +625,14 @@ xyl_tukey
 ```{r}
 # Clean data and filter for Styrene
 sty = all_clean %>%
-  select(Sampling.Site, Phase, Mud, Styrene) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, Styrene) %>%
   filter(Sampling.Site == "Interchange A" | Sampling.Site == "Interchange B" | Sampling.Site == "Livingston" | Sampling.Site == "Northwest A" | Sampling.Site == "Northwest B" | Sampling.Site == "United" | Sampling.Site == "Commons")
 
 sty$Sampling.Site <- as.factor(sty$Sampling.Site)
 sty$Phase <- as.factor(sty$Phase)
 
-# Run ANOVA
-sty_anova = aov(Styrene ~ Sampling.Site * Phase, data = sty)
+#run regular anova to see if there's differences between sampling sites at the same phases to justify repeated measures
+sty_anova = aov(Styrene ~ Sampling.Site, data = sty)
 summary(sty_anova)
 
 # Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
@@ -417,15 +646,38 @@ sty$log_Styrene <- log(sty$Styrene)
 hist(sty$log_Styrene)
 leveneTest(log_Styrene ~ Sampling.Site * Phase, data = sty) # Reduced by orders of magnitude, so good enough
 
-# Re-run ANOVA with transformed values
-sty_anova = aov(log_Styrene ~ Sampling.Site * Phase, data = sty)
-summary(sty_anova)
-capture.output(sty_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/styrene_anova_OG")
+# run rmANOVA with transformed values
 
-# Tukey's post-hoc
-sty_tukey = TukeyHSD(x = sty_anova, conf.level = 0.95)
-capture.output(sty_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/styrene_tukey_OG")
-sty_tukey
+sty_lmer = lmer(log_Styrene ~ Phase + (1|Sampling.Site), data = sty)
+anova(sty_lmer)
+sty_emmeans = emmeans(sty_lmer, list(pairwise ~ Phase), adjust = "bonferroni")
+sty_emmeans
+capture.output(sty_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/styrene_emmeans_OG")
+
+qqnorm(residuals(sty_lmer))
+qqline(residuals(sty_lmer), col=2)
+
+## get back normalized emmeans for reporting in tables ##
+
+# Extract emmeans for the Phase variable
+phase_emmeans <- emmeans(sty_lmer, ~ Phase)
+
+# Compute pairwise contrasts
+pairwise_phase <- contrast(phase_emmeans, method = "pairwise", adjust = "bonferroni")
+
+# Convert contrasts to a data frame
+pairwise_phase_df <- as.data.frame(pairwise_phase)
+
+# Modify estimates for specific comparisons and back-transform
+pairwise_phase <- pairwise_phase_df %>%
+  mutate(
+    adjusted_estimate = ifelse(
+      contrast %in% c("commons - drilling", "commons - pre", "commons - prod"), 
+      -1 * estimate, 
+      estimate
+    ),
+    original_scale_estimate = 10^(adjusted_estimate)
+  )
 ```
 
 
@@ -433,14 +685,14 @@ sty_tukey
 ```{r}
 # Clean data and filter for n.Nonane
 nn = all_clean %>%
-  select(Sampling.Site, Phase, Mud, n.Nonane) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, n.Nonane) %>%
   filter(Sampling.Site == "Interchange A" | Sampling.Site == "Interchange B" | Sampling.Site == "Livingston" | Sampling.Site == "Northwest A" | Sampling.Site == "Northwest B" | Sampling.Site == "United" | Sampling.Site == "Commons")
 
 nn$Sampling.Site <- as.factor(nn$Sampling.Site)
 nn$Phase <- as.factor(nn$Phase)
 
-# Run ANOVA
-nn_anova = aov(n.Nonane ~ Sampling.Site * Phase, data = nn)
+#run regular anova to see if there's differences between sampling sites at the same phases to justify repeated measures (SIGNIFICANCE HERE)
+nn_anova = aov(n.Nonane ~ Sampling.Site, data = nn)
 summary(nn_anova)
 
 # Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
@@ -454,15 +706,37 @@ nn$log_n.Nonane <- log(nn$n.Nonane)
 hist(nn$log_n.Nonane)
 leveneTest(log_n.Nonane ~ Sampling.Site * Phase, data = nn) # Reduced by orders of magnitude, so good enough
 
-# Re-run ANOVA with transformed values
-nn_anova = aov(log_n.Nonane ~ Sampling.Site * Phase, data = nn)
-summary(nn_anova)
-capture.output(nn_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/n_nonane_anova_OG")
+# run rmANOVA with transformed values
+nn_lmer = lmer(log_n.Nonane ~ Phase + (1|Sampling.Site), data = nn)
+anova(nn_lmer)
+nn_emmeans = emmeans(nn_lmer, list(pairwise ~ Phase), adjust = "bonferroni")
+nn_emmeans
+capture.output(nn_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/nnonane_emmeans_OG")
 
-# Tukey's post-hoc
-nn_tukey = TukeyHSD(x = nn_anova, conf.level = 0.95)
-capture.output(nn_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/n_nonane_tukey_OG")
-nn_tukey
+qqnorm(residuals(nn_lmer))
+qqline(residuals(nn_lmer), col=2)
+
+## get back normalized emmeans for reporting in tables ##
+
+# Extract emmeans for the Phase variable
+phase_emmeans <- emmeans(nn_lmer, ~ Phase)
+
+# Compute pairwise contrasts
+pairwise_phase <- contrast(phase_emmeans, method = "pairwise", adjust = "bonferroni")
+
+# Convert contrasts to a data frame
+pairwise_phase_df <- as.data.frame(pairwise_phase)
+
+# Modify estimates for specific comparisons and back-transform
+pairwise_phase <- pairwise_phase_df %>%
+  mutate(
+    adjusted_estimate = ifelse(
+      contrast %in% c("commons - drilling", "commons - pre", "commons - prod"), 
+      -1 * estimate, 
+      estimate
+    ),
+    original_scale_estimate = 10^(adjusted_estimate)
+  )
 ```
 
 
@@ -470,14 +744,14 @@ nn_tukey
 ```{r}
 # Clean data and filter for n.Decane
 nd = all_clean %>%
-  select(Sampling.Site, Phase, Mud, n.Decane) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, n.Decane) %>%
   filter(Sampling.Site == "Interchange A" | Sampling.Site == "Interchange B" | Sampling.Site == "Livingston" | Sampling.Site == "Northwest A" | Sampling.Site == "Northwest B" | Sampling.Site == "United" | Sampling.Site == "Commons")
 
 nd$Sampling.Site <- as.factor(nd$Sampling.Site)
 nd$Phase <- as.factor(nd$Phase)
 
-# Run ANOVA
-nd_anova = aov(n.Decane ~ Sampling.Site * Phase, data = nd)
+#run regular anova to see if there's differences between sampling sites at the same phases to justify repeated measures (SIGNIFICANCE HERE)
+nd_anova = aov(n.Decane ~ Sampling.Site, data = nd)
 summary(nd_anova)
 
 # Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
@@ -491,15 +765,37 @@ nd$log_n.Decane <- log(nd$n.Decane)
 hist(nd$log_n.Decane)
 leveneTest(log_n.Decane ~ Sampling.Site * Phase, data = nd) # Reduced by orders of magnitude, so good enough
 
-# Re-run ANOVA with transformed values
-nd_anova = aov(log_n.Decane ~ Sampling.Site * Phase, data = nd)
-summary(nd_anova)
-capture.output(nd_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/n_decane_anova_OG")
+# run rmANOVA with transformed values
+nd_lmer = lmer(log_n.Decane ~ Phase + (1|Sampling.Site), data = nd)
+anova(nd_lmer)
+nd_emmeans = emmeans(nd_lmer, list(pairwise ~ Phase), adjust = "bonferroni")
+nd_emmeans
+capture.output(nd_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/ndecane_emmeans_OG")
 
-# Tukey's post-hoc
-nd_tukey = TukeyHSD(x = nd_anova, conf.level = 0.95)
-capture.output(nd_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/n_decane_tukey_OG")
-nd_tukey
+qqnorm(residuals(nd_lmer))
+qqline(residuals(nd_lmer), col=2)
+
+## get back normalized emmeans for reporting in tables ##
+
+# Extract emmeans for the Phase variable
+phase_emmeans <- emmeans(nd_lmer, ~ Phase)
+
+# Compute pairwise contrasts
+pairwise_phase <- contrast(phase_emmeans, method = "pairwise", adjust = "bonferroni")
+
+# Convert contrasts to a data frame
+pairwise_phase_df <- as.data.frame(pairwise_phase)
+
+# Modify estimates for specific comparisons and back-transform
+pairwise_phase <- pairwise_phase_df %>%
+  mutate(
+    adjusted_estimate = ifelse(
+      contrast %in% c("commons - drilling", "commons - pre", "commons - prod"), 
+      -1 * estimate, 
+      estimate
+    ),
+    original_scale_estimate = 10^(adjusted_estimate)
+  )
 ```
 
 
@@ -507,14 +803,14 @@ nd_tukey
 ```{r}
 # Clean data and filter for TCE
 tce = all_clean %>%
-  select(Sampling.Site, Phase, Mud, TCE) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, TCE) %>%
   filter(Sampling.Site == "Interchange A" | Sampling.Site == "Interchange B" | Sampling.Site == "Livingston" | Sampling.Site == "Northwest A" | Sampling.Site == "Northwest B" | Sampling.Site == "United" | Sampling.Site == "Commons")
 
 tce$Sampling.Site <- as.factor(tce$Sampling.Site)
 tce$Phase <- as.factor(tce$Phase)
 
-# Run ANOVA
-tce_anova = aov(TCE ~ Sampling.Site * Phase, data = tce)
+#run regular anova to see if there's differences between sampling sites at the same phases to justify repeated measures (SIGNIFICANCE HERE)
+tce_anova = aov(TCE ~ Sampling.Site, data = tce)
 summary(tce_anova)
 
 # Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
@@ -528,15 +824,37 @@ tce$log_TCE <- log(tce$TCE)
 hist(tce$log_TCE)
 leveneTest(log_TCE ~ Sampling.Site * Phase, data = tce) # Reduced by orders of magnitude, so good enough
 
-# Re-run ANOVA with transformed values
-tce_anova = aov(log_TCE ~ Sampling.Site * Phase, data = tce)
-summary(tce_anova)
-capture.output(tce_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/tce_anova_OG")
+# run rmANOVA with transformed values
+tce_lmer = lmer(log_TCE ~ Phase + (1|Sampling.Site), data = tce)
+anova(tce_lmer)
+tce_emmeans = emmeans(tce_lmer, list(pairwise ~ Phase), adjust = "bonferroni")
+tce_emmeans
+capture.output(tce_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/tce_emmeans_OG")
 
-# Tukey's post-hoc
-tce_tukey = TukeyHSD(x = tce_anova, conf.level = 0.95)
-capture.output(tce_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/tce_tukey_OG")
-tce_tukey
+qqnorm(residuals(tce_lmer))
+qqline(residuals(tce_lmer), col=2)
+
+## get back normalized emmeans for reporting in tables ##
+
+# Extract emmeans for the Phase variable
+phase_emmeans <- emmeans(tce_lmer, ~ Phase)
+
+# Compute pairwise contrasts
+pairwise_phase <- contrast(phase_emmeans, method = "pairwise", adjust = "bonferroni")
+
+# Convert contrasts to a data frame
+pairwise_phase_df <- as.data.frame(pairwise_phase)
+
+# Modify estimates for specific comparisons and back-transform
+pairwise_phase <- pairwise_phase_df %>%
+  mutate(
+    adjusted_estimate = ifelse(
+      contrast %in% c("commons - drilling", "commons - pre", "commons - prod"), 
+      -1 * estimate, 
+      estimate
+    ),
+    original_scale_estimate = 10^(adjusted_estimate)
+  )
 ```
 
 
@@ -544,14 +862,14 @@ tce_tukey
 ```{r}
 # Clean data and filter for PCE
 pce = all_clean %>%
-  select(Sampling.Site, Phase, Mud, PCE) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, PCE) %>%
   filter(Sampling.Site == "Interchange A" | Sampling.Site == "Interchange B" | Sampling.Site == "Livingston" | Sampling.Site == "Northwest A" | Sampling.Site == "Northwest B" | Sampling.Site == "United" | Sampling.Site == "Commons")
 
 pce$Sampling.Site <- as.factor(pce$Sampling.Site)
 pce$Phase <- as.factor(pce$Phase)
 
-# Run ANOVA
-pce_anova = aov(PCE ~ Sampling.Site * Phase, data = pce)
+#run regular anova to see if there's differences between sampling sites at the same phases to justify repeated measures (SIGNIFICANCE HERE)
+pce_anova = aov(PCE ~ Sampling.Site, data = pce)
 summary(pce_anova)
 
 # Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
@@ -565,15 +883,37 @@ pce$log_PCE <- log(pce$PCE)
 hist(pce$log_PCE)
 leveneTest(log_PCE ~ Sampling.Site * Phase, data = pce) # Reduced by orders of magnitude, so good enough
 
-# Re-run ANOVA with transformed values
-pce_anova = aov(log_PCE ~ Sampling.Site * Phase, data = pce)
-summary(pce_anova)
-capture.output(pce_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/pce_anova_OG")
+# run rmANOVA with transformed values
+pce_lmer = lmer(log_PCE ~ Phase + (1|Sampling.Site), data = pce)
+anova(pce_lmer)
+pce_emmeans = emmeans(pce_lmer, list(pairwise ~ Phase), adjust = "bonferroni")
+pce_emmeans
+capture.output(pce_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/pce_emmeans_OG")
 
-# Tukey's post-hoc
-pce_tukey = TukeyHSD(x = pce_anova, conf.level = 0.95)
-capture.output(pce_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/pce_tukey_OG")
-pce_tukey
+qqnorm(residuals(pce_lmer))
+qqline(residuals(pce_lmer), col=2)
+
+## get back normalized emmeans for reporting in tables ##
+
+# Extract emmeans for the Phase variable
+phase_emmeans <- emmeans(pce_lmer, ~ Phase)
+
+# Compute pairwise contrasts
+pairwise_phase <- contrast(phase_emmeans, method = "pairwise", adjust = "bonferroni")
+
+# Convert contrasts to a data frame
+pairwise_phase_df <- as.data.frame(pairwise_phase)
+
+# Modify estimates for specific comparisons and back-transform
+pairwise_phase <- pairwise_phase_df %>%
+  mutate(
+    adjusted_estimate = ifelse(
+      contrast %in% c("commons - drilling", "commons - pre", "commons - prod"), 
+      -1 * estimate, 
+      estimate
+    ),
+    original_scale_estimate = 10^(adjusted_estimate)
+  )
 ```
 
 
@@ -581,14 +921,14 @@ pce_tukey
 ```{r}
 # Clean data and filter for Aliphatic_low
 aliph = all_clean %>%
-  select(Sampling.Site, Phase, Mud, Aliphatic_low) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, Aliphatic_low) %>%
   filter(Sampling.Site == "Interchange A" | Sampling.Site == "Interchange B" | Sampling.Site == "Livingston" | Sampling.Site == "Northwest A" | Sampling.Site == "Northwest B" | Sampling.Site == "United" | Sampling.Site == "Commons")
 
 aliph$Sampling.Site <- as.factor(aliph$Sampling.Site)
 aliph$Phase <- as.factor(aliph$Phase)
 
-# Run ANOVA
-aliph_anova = aov(Aliphatic_low ~ Sampling.Site * Phase, data = aliph)
+#run regular anova to see if there's differences between sampling sites at the same phases to justify repeated measures (SIGNIFICANCE HERE)
+aliph_anova = aov(Aliphatic_low ~ Sampling.Site, data = aliph)
 summary(aliph_anova)
 
 # Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
@@ -602,15 +942,37 @@ aliph$log_Aliphatic_low <- log(aliph$Aliphatic_low)
 hist(aliph$log_Aliphatic_low)
 leveneTest(log_Aliphatic_low ~ Sampling.Site * Phase, data = aliph) # Reduced by orders of magnitude, so good enough
 
-# Re-run ANOVA with transformed values
-aliph_anova = aov(log_Aliphatic_low ~ Sampling.Site * Phase, data = aliph)
-summary(aliph_anova)
-capture.output(aliph_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/aliphatic_low_anova_OG")
+# run rmANOVA with transformed values
+aliph_lmer = lmer(log_Aliphatic_low ~ Phase + (1|Sampling.Site), data = aliph)
+anova(aliph_lmer)
+aliph_emmeans = emmeans(aliph_lmer, list(pairwise ~ Phase), adjust = "bonferroni")
+aliph_emmeans
+capture.output(aliph_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/aliphaticlow_emmeans_OG")
 
-# Tukey's post-hoc
-aliph_tukey = TukeyHSD(x = aliph_anova, conf.level = 0.95)
-capture.output(aliph_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/aliphatic_low_tukey_OG")
-aliph_tukey
+qqnorm(residuals(aliph_lmer))
+qqline(residuals(aliph_lmer), col=2)
+
+## get back normalized emmeans for reporting in tables ##
+
+# Extract emmeans for the Phase variable
+phase_emmeans <- emmeans(aliph_lmer, ~ Phase)
+
+# Compute pairwise contrasts
+pairwise_phase <- contrast(phase_emmeans, method = "pairwise", adjust = "bonferroni")
+
+# Convert contrasts to a data frame
+pairwise_phase_df <- as.data.frame(pairwise_phase)
+
+# Modify estimates for specific comparisons and back-transform
+pairwise_phase <- pairwise_phase_df %>%
+  mutate(
+    adjusted_estimate = ifelse(
+      contrast %in% c("commons - drilling", "commons - pre", "commons - prod"), 
+      -1 * estimate, 
+      estimate
+    ),
+    original_scale_estimate = 10^(adjusted_estimate)
+  )
 ```
 
 
@@ -619,14 +981,14 @@ aliph_tukey
 ```{r}
 # Clean data and filter for Aromatic_medium
 aro = all_clean %>%
-  select(Sampling.Site, Phase, Mud, Aromatic_medium) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, Aromatic_medium) %>%
   filter(Sampling.Site == "Interchange A" | Sampling.Site == "Interchange B" | Sampling.Site == "Livingston" | Sampling.Site == "Northwest A" | Sampling.Site == "Northwest B" | Sampling.Site == "United" | Sampling.Site == "Commons")
 
 aro$Sampling.Site <- as.factor(aro$Sampling.Site)
 aro$Phase <- as.factor(aro$Phase)
 
-# Run ANOVA
-aro_anova = aov(Aromatic_medium ~ Sampling.Site * Phase, data = aro)
+#run regular anova to see if there's differences between sampling sites at the same phases to justify repeated measures (SIGNIFICANCE HERE)
+aro_anova = aov(Aromatic_medium ~ Sampling.Site, data = aro)
 summary(aro_anova)
 
 # Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
@@ -640,15 +1002,37 @@ aro$log_Aromatic_medium <- log(aro$Aromatic_medium)
 hist(aro$log_Aromatic_medium)
 leveneTest(log_Aromatic_medium ~ Sampling.Site * Phase, data = aro) # Reduced by orders of magnitude, so good enough
 
-# Re-run ANOVA with transformed values
-aro_anova = aov(log_Aromatic_medium ~ Sampling.Site * Phase, data = aro)
-summary(aro_anova)
-capture.output(aro_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/aromatic_medium_anova_OG")
+# run rmANOVA with transformed values
+aro_lmer = lmer(log_Aromatic_medium ~ Phase + (1|Sampling.Site), data = aro)
+anova(aro_lmer)
+aro_emmeans = emmeans(aro_lmer, list(pairwise ~ Phase), adjust = "bonferroni")
+aro_emmeans
+capture.output(aro_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/aromaticmed_emmeans_OG")
 
-# Tukey's post-hoc
-aro_tukey = TukeyHSD(x = aro_anova, conf.level = 0.95)
-capture.output(aro_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/aromatic_medium_tukey_OG")
-aro_tukey
+qqnorm(residuals(aro_lmer))
+qqline(residuals(aro_lmer), col=2)
+
+## get back normalized emmeans for reporting in tables ##
+
+# Extract emmeans for the Phase variable
+phase_emmeans <- emmeans(aro_lmer, ~ Phase)
+
+# Compute pairwise contrasts
+pairwise_phase <- contrast(phase_emmeans, method = "pairwise", adjust = "bonferroni")
+
+# Convert contrasts to a data frame
+pairwise_phase_df <- as.data.frame(pairwise_phase)
+
+# Modify estimates for specific comparisons and back-transform
+pairwise_phase <- pairwise_phase_df %>%
+  mutate(
+    adjusted_estimate = ifelse(
+      contrast %in% c("commons - drilling", "commons - pre", "commons - prod"), 
+      -1 * estimate, 
+      estimate
+    ),
+    original_scale_estimate = 10^(adjusted_estimate)
+  )
 ```
 
 
@@ -656,14 +1040,14 @@ aro_tukey
 ```{r}
 # Clean data and filter for Aromatic_medium
 pro = all_clean %>%
-  select(Sampling.Site, Phase, Mud, Propene) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, Propene) %>%
   filter(Sampling.Site == "Interchange A" | Sampling.Site == "Interchange B" | Sampling.Site == "Livingston" | Sampling.Site == "Northwest A" | Sampling.Site == "Northwest B" | Sampling.Site == "United" | Sampling.Site == "Commons")
 
 pro$Sampling.Site <- as.factor(pro$Sampling.Site)
 pro$Phase <- as.factor(pro$Phase)
 
-# Run ANOVA
-pro_anova = aov(Propene ~ Sampling.Site * Phase, data = pro)
+#run regular anova to see if there's differences between sampling sites at the same phases to justify repeated measures (SIGNIFICANCE HERE)
+pro_anova = aov(Propene ~ Sampling.Site, data = pro)
 summary(pro_anova)
 
 # Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
@@ -677,146 +1061,243 @@ pro$log_Propene <- log(pro$Propene)
 hist(pro$log_Propene)
 leveneTest(log_Propene ~ Sampling.Site * Phase, data = pro) # Reduced by orders of magnitude, so good enough
 
-# Re-run ANOVA with transformed values
-pro_anova = aov(log_Propene ~ Sampling.Site * Phase, data = pro)
-summary(pro_anova)
-capture.output(pro_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/propene_anova_OG")
+# run rmANOVA with transformed values
+pro_lmer = lmer(log_Propene ~ Phase + (1|Sampling.Site), data = pro)
+anova(pro_lmer)
+pro_emmeans = emmeans(pro_lmer, list(pairwise ~ Phase), adjust = "bonferroni")
+pro_emmeans
+capture.output(pro_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/propene_emmeans_OG")
 
-# Tukey's post-hoc
-pro_tukey = TukeyHSD(x = pro_anova, conf.level = 0.95)
-capture.output(pro_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/propene_tukey_OG")
-pro_tukey
+qqnorm(residuals(pro_lmer))
+qqline(residuals(pro_lmer), col=2)
+
+## get back normalized emmeans for reporting in tables ##
+
+# Extract emmeans for the Phase variable
+phase_emmeans <- emmeans(pro_lmer, ~ Phase)
+
+# Compute pairwise contrasts
+pairwise_phase <- contrast(phase_emmeans, method = "pairwise", adjust = "bonferroni")
+
+# Convert contrasts to a data frame
+pairwise_phase_df <- as.data.frame(pairwise_phase)
+
+# Modify estimates for specific comparisons and back-transform
+pairwise_phase <- pairwise_phase_df %>%
+  mutate(
+    adjusted_estimate = ifelse(
+      contrast %in% c("commons - drilling", "commons - pre", "commons - prod"), 
+      -1 * estimate, 
+      estimate
+    ),
+    original_scale_estimate = 10^(adjusted_estimate)
+  )
 ```
 
 
-## do all of the above for community sites
 
-# Benzene
+## all of the above for community sites ##
+
+#benzene
 ```{r}
-# Clean data and filter for Benzene
-all_clean$Phase[is.na(all_clean$Phase)] = "none"
+#clean data and filter for benzene
+all_clean$Phase[is.na(all_clean$Phase)] = "commons"
 
 ben = all_clean %>%
-  select(Sampling.Site, Phase, Mud, Benzene) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, Benzene) %>%
   filter(Sampling.Site == "Wildgrass" | Sampling.Site == "Anthem")
 
 ben$Sampling.Site <- as.factor(ben$Sampling.Site)
 ben$Phase <- as.factor(ben$Phase)
 
-# Run ANOVA
-ben_anova = aov(Benzene ~ Sampling.Site * Phase, data = ben)
+#run regular anova to see if there's differences between sampling sites at the same phases to justify repeated measures
+ben_anova = aov(Benzene ~ Sampling.Site, data = ben)
 summary(ben_anova)
 
-# Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
+#Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
 shapiro.test(ben_anova$residuals)
 
-# Levene's Test for homogeneity of variances (p < 0.05, variances are not homogenous)
+#Levene's Test for homogeneity of variances (p < 0.05, variances are not homogenous)
 leveneTest(Benzene ~ Sampling.Site * Phase, data = ben)
 
-# Log-transform and check distribution with histogram and tests
+#log-transform and check distribution with histogram and tests
 ben$log_Benzene <- log(ben$Benzene)
-hist(ben)
-leveneTest(log_Benzene ~ Sampling.Site * Phase, data = ben) # not significant anymore
+hist(ben$log_Benzene)
+leveneTest(log_Benzene ~ Sampling.Site * Phase, data = ben) #not sig anymore
 
-# Re-run ANOVA with transformed values
-ben_anova = aov(log_Benzene ~ Sampling.Site * Phase, data = ben)
-summary(ben_anova)
-capture.output(ben_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/benzene_anova_comm")
+#run rmANOVA with transformed values
+ben_lmer = lmer(log_Benzene ~ Phase + (1|Sampling.Site), data = ben)
+anova(ben_lmer)
+ben_emmeans = emmeans(ben_lmer, list(pairwise ~ Phase), adjust = "bonferroni")
+ben_emmeans
+capture.output(ben_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/benzene_emmeans_comm")
 
-# Tukey's post-hoc
-ben_tukey = TukeyHSD(x = ben_anova, conf.level = 0.95)
-capture.output(ben_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/benzene_tukey_comm")
-ben_tukey
+qqnorm(residuals(ben_lmer))
+qqline(residuals(ben_lmer), col=2)
+
+#n for each phase
+phasen_comm <- ben %>%
+  group_by(Phase) %>%
+  summarise(n = n())
+
+write.csv(phasen_comm, file = "~/CO_CRA/CO_CRA/Output/Air_Data/n_byphase_comm.csv")
+
+## get back normalized emmeans for reporting in tables ##
+
+# Extract emmeans for the Phase variable
+phase_emmeans <- emmeans(ben_lmer, ~ Phase)
+
+# Compute pairwise contrasts
+pairwise_phase <- contrast(phase_emmeans, method = "pairwise", adjust = "bonferroni")
+
+# Convert contrasts to a data frame
+pairwise_phase_df <- as.data.frame(pairwise_phase)
+
+# Modify estimates for specific comparisons and back-transform
+pairwise_phase <- pairwise_phase_df %>%
+  mutate(
+    adjusted_estimate = ifelse(
+      contrast %in% c("none - pre", "none - prod"), 
+      -1 * estimate, 
+      estimate
+    ),
+    original_scale_estimate = 10^(adjusted_estimate)
+  )
+
 ```
-
 
 #toluene
 ```{r}
-# Clean data and filter for Toluene
+#clean data and filter for toluene
 tol = all_clean %>%
-  select(Sampling.Site, Phase, Mud, Toluene) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, Toluene) %>%
   filter(Sampling.Site == "Wildgrass" | Sampling.Site == "Anthem")
 
 tol$Sampling.Site <- as.factor(tol$Sampling.Site)
 tol$Phase <- as.factor(tol$Phase)
 
-# Run ANOVA
-tol_anova = aov(Toluene ~ Sampling.Site * Phase, data = tol)
+#run regular anova to see if there's differences between sampling sites at the same phases to justify repeated measures
+tol_anova = aov(Toluene ~ Sampling.Site, data = tol)
 summary(tol_anova)
 
-# Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
+#Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
 shapiro.test(tol_anova$residuals)
 
-# Levene's Test for homogeneity of variances (p < 0.05, variances are not homogenous)
+#Levene's Test for homogeneity of variances (p < 0.05, variances are not homogenous)
 leveneTest(Toluene ~ Sampling.Site * Phase, data = tol)
 
-# Log-transform and check distribution with histogram and tests
+#log-transform and check distribution with histogram and tests
 tol$log_Toluene <- log(tol$Toluene)
-hist(tol)
-leveneTest(log_Toluene ~ Sampling.Site * Phase, data = tol) # not sig anymore
+hist(tol$log_Toluene)
+leveneTest(log_Toluene ~ Sampling.Site * Phase, data = tol) #not sig anymore
 
-# Re-run ANOVA with transformed values
-tol_anova = aov(log_Toluene ~ Sampling.Site * Phase, data = tol)
-summary(tol_anova)
-capture.output(tol_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/toluene_anova_comm")
+#run rmANOVA with transformed values
+tol_lmer = lmer(log_Toluene ~ Phase + (1|Sampling.Site), data = tol)
+anova(tol_lmer)
+tol_emmeans = emmeans(tol_lmer, list(pairwise ~ Phase), adjust = "bonferroni")
+tol_emmeans
+capture.output(tol_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/toluene_emmeans_comm")
 
-# Tukey's post-hoc
-tol_tukey = TukeyHSD(x = tol_anova, conf.level = 0.95)
-capture.output(tol_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/toluene_tukey_comm")
-tol_tukey
+qqnorm(residuals(tol_lmer))
+qqline(residuals(tol_lmer), col=2)
+
+## get back normalized emmeans for reporting in tables ##
+
+# Extract emmeans for the Phase variable
+phase_emmeans <- emmeans(tol_lmer, ~ Phase)
+
+# Compute pairwise contrasts
+pairwise_phase <- contrast(phase_emmeans, method = "pairwise", adjust = "bonferroni")
+
+# Convert contrasts to a data frame
+pairwise_phase_df <- as.data.frame(pairwise_phase)
+
+# Modify estimates for specific comparisons and back-transform
+pairwise_phase <- pairwise_phase_df %>%
+  mutate(
+    adjusted_estimate = ifelse(
+      contrast %in% c("none - pre", "none - prod"), 
+      -1 * estimate, 
+      estimate
+    ),
+    original_scale_estimate = 10^(adjusted_estimate)
+  )
 ```
 
 
-#ethylbenzene
+
+# Ethylbenzene
 ```{r}
 # Clean data and filter for Ethylbenzene
 eb = all_clean %>%
-  select(Sampling.Site, Phase, Mud, Ethylbenzene) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, Ethylbenzene) %>%
   filter(Sampling.Site == "Wildgrass" | Sampling.Site == "Anthem")
 
 eb$Sampling.Site <- as.factor(eb$Sampling.Site)
 eb$Phase <- as.factor(eb$Phase)
 
-# Run ANOVA
-eb_anova = aov(Ethylbenzene ~ Sampling.Site * Phase, data = eb)
+#run regular anova to see if there's differences between sampling sites at the same phases to justify repeated measures
+eb_anova = aov(Ethylbenzene ~ Sampling.Site, data = eb)
 summary(eb_anova)
 
-# Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
+#Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
 shapiro.test(eb_anova$residuals)
 
-# Levene's Test for homogeneity of variances (p < 0.05, variances are not homogenous)
+#Levene's Test for homogeneity of variances (p < 0.05, variances are not homogenous)
 leveneTest(Ethylbenzene ~ Sampling.Site * Phase, data = eb)
 
-# Log-transform and check distribution with histogram and tests
+#log-transform and check distribution with histogram and tests
 eb$log_Ethylbenzene <- log(eb$Ethylbenzene)
-hist(eb)
-leveneTest(log_Ethylbenzene ~ Sampling.Site * Phase, data = eb) # not significant anymore
+hist(eb$log_Ethylbenzene)
+leveneTest(log_Ethylbenzene ~ Sampling.Site * Phase, data = eb) #not significant now
 
-# Re-run ANOVA with transformed values
-eb_anova = aov(log_Ethylbenzene ~ Sampling.Site * Phase, data = eb)
-summary(eb_anova)
-capture.output(eb_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/ethylbenzene_anova_comm")
+#run rmANOVA with transformed values
+eb_lmer = lmer(log_Ethylbenzene ~ Phase + (1|Sampling.Site), data = eb)
+anova(eb_lmer)
+eb_emmeans = emmeans(eb_lmer, list(pairwise ~ Phase), adjust = "bonferroni")
+eb_emmeans
+capture.output(eb_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/ethylbenzene_emmeans_comm")
 
-# Tukey's post-hoc
-eb_tukey = TukeyHSD(x = eb_anova, conf.level = 0.95)
-capture.output(eb_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/ethylbenzene_tukey_comm")
-eb_tukey
+qqnorm(residuals(eb_lmer))
+qqline(residuals(eb_lmer), col=2)
+
+## get back normalized emmeans for reporting in tables ##
+
+# Extract emmeans for the Phase variable
+phase_emmeans <- emmeans(eb_lmer, ~ Phase)
+
+# Compute pairwise contrasts
+pairwise_phase <- contrast(phase_emmeans, method = "pairwise", adjust = "bonferroni")
+
+# Convert contrasts to a data frame
+pairwise_phase_df <- as.data.frame(pairwise_phase)
+
+# Modify estimates for specific comparisons and back-transform
+pairwise_phase <- pairwise_phase_df %>%
+  mutate(
+    adjusted_estimate = ifelse(
+      contrast %in% c("none - pre", "none - prod"), 
+      -1 * estimate, 
+      estimate
+    ),
+    original_scale_estimate = 10^(adjusted_estimate)
+  )
 
 ```
 
 
-#xylenes
+# Xylenes
 ```{r}
 # Clean data and filter for Xylenes
 xyl = all_clean %>%
-  select(Sampling.Site, Phase, Mud, Xylenes) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, Xylenes) %>%
   filter(Sampling.Site == "Wildgrass" | Sampling.Site == "Anthem")
 
 xyl$Sampling.Site <- as.factor(xyl$Sampling.Site)
 xyl$Phase <- as.factor(xyl$Phase)
 
-# Run ANOVA
-xyl_anova = aov(Xylenes ~ Sampling.Site * Phase, data = xyl)
+#run regular anova to see if there's differences between sampling sites at the same phases to justify repeated measures
+xyl_anova = aov(Xylenes ~ Sampling.Site, data = xyl)
 summary(xyl_anova)
 
 # Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
@@ -827,35 +1308,55 @@ leveneTest(Xylenes ~ Sampling.Site * Phase, data = xyl)
 
 # Log-transform and check distribution with histogram and tests
 xyl$log_Xylenes <- log(xyl$Xylenes)
-hist(xyl)
+hist(xyl$log_Xylenes)
 leveneTest(log_Xylenes ~ Sampling.Site * Phase, data = xyl) # not sig anymore
 
-# Re-run ANOVA with transformed values
-xyl_anova = aov(log_Xylenes ~ Sampling.Site * Phase, data = xyl)
-summary(xyl_anova)
-capture.output(xyl_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/xylenes_anova_comm")
+# run rmANOVA with transformed values
+xyl_lmer = lmer(log_Xylenes ~ Phase + (1|Sampling.Site), data = xyl)
+anova(xyl_lmer)
+xyl_emmeans = emmeans(xyl_lmer, list(pairwise ~ Phase), adjust = "bonferroni")
+xyl_emmeans
+capture.output(xyl_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/xylenes_emmeans_comm")
 
-# Tukey's post-hoc
-xyl_tukey = TukeyHSD(x = xyl_anova, conf.level = 0.95)
-capture.output(xyl_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/xylenes_tukey_comm")
-xyl_tukey
+qqnorm(residuals(xyl_lmer))
+qqline(residuals(xyl_lmer), col=2)
 
+## get back normalized emmeans for reporting in tables ##
 
+# Extract emmeans for the Phase variable
+phase_emmeans <- emmeans(xyl_lmer, ~ Phase)
+
+# Compute pairwise contrasts
+pairwise_phase <- contrast(phase_emmeans, method = "pairwise", adjust = "bonferroni")
+
+# Convert contrasts to a data frame
+pairwise_phase_df <- as.data.frame(pairwise_phase)
+
+# Modify estimates for specific comparisons and back-transform
+pairwise_phase <- pairwise_phase_df %>%
+  mutate(
+    adjusted_estimate = ifelse(
+      contrast %in% c("none - pre", "none - prod"), 
+      -1 * estimate, 
+      estimate
+    ),
+    original_scale_estimate = 10^(adjusted_estimate)
+  )
 ```
 
 
-#styrene
+# Styrene
 ```{r}
 # Clean data and filter for Styrene
 sty = all_clean %>%
-  select(Sampling.Site, Phase, Mud, Styrene) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, Styrene) %>%
   filter(Sampling.Site == "Wildgrass" | Sampling.Site == "Anthem")
 
 sty$Sampling.Site <- as.factor(sty$Sampling.Site)
 sty$Phase <- as.factor(sty$Phase)
 
-# Run ANOVA
-sty_anova = aov(Styrene ~ Sampling.Site * Phase, data = sty)
+#run regular anova to see if there's differences between sampling sites at the same phases to justify repeated measures
+sty_anova = aov(Styrene ~ Sampling.Site, data = sty)
 summary(sty_anova)
 
 # Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
@@ -866,33 +1367,55 @@ leveneTest(Styrene ~ Sampling.Site * Phase, data = sty)
 
 # Log-transform and check distribution with histogram and tests
 sty$log_Styrene <- log(sty$Styrene)
-hist(sty)
+hist(sty$log_Styrene)
 leveneTest(log_Styrene ~ Sampling.Site * Phase, data = sty) # Reduced by orders of magnitude, so good enough
 
-# Re-run ANOVA with transformed values
-sty_anova = aov(log_Styrene ~ Sampling.Site * Phase, data = sty)
-summary(sty_anova)
-capture.output(sty_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/styrene_anova_comm")
+# run rmANOVA with transformed values
+sty_lmer = lmer(log_Styrene ~ Phase + (1|Sampling.Site), data = sty)
+anova(sty_lmer)
+sty_emmeans = emmeans(sty_lmer, list(pairwise ~ Phase), adjust = "bonferroni")
+sty_emmeans
+capture.output(sty_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/styrene_emmeans_comm")
 
-# Tukey's post-hoc
-sty_tukey = TukeyHSD(x = sty_anova, conf.level = 0.95)
-capture.output(sty_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/styrene_tukey_comm")
-sty_tukey
+qqnorm(residuals(sty_lmer))
+qqline(residuals(sty_lmer), col=2)
+
+## get back normalized emmeans for reporting in tables ##
+
+# Extract emmeans for the Phase variable
+phase_emmeans <- emmeans(sty_lmer, ~ Phase)
+
+# Compute pairwise contrasts
+pairwise_phase <- contrast(phase_emmeans, method = "pairwise", adjust = "bonferroni")
+
+# Convert contrasts to a data frame
+pairwise_phase_df <- as.data.frame(pairwise_phase)
+
+# Modify estimates for specific comparisons and back-transform
+pairwise_phase <- pairwise_phase_df %>%
+  mutate(
+    adjusted_estimate = ifelse(
+      contrast %in% c("none - pre", "none - prod"), 
+      -1 * estimate, 
+      estimate
+    ),
+    original_scale_estimate = 10^(adjusted_estimate)
+  )
 ```
 
 
-#n.nonane
+# n.Nonane
 ```{r}
 # Clean data and filter for n.Nonane
 nn = all_clean %>%
-  select(Sampling.Site, Phase, Mud, n.Nonane) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, n.Nonane) %>%
   filter(Sampling.Site == "Wildgrass" | Sampling.Site == "Anthem")
 
 nn$Sampling.Site <- as.factor(nn$Sampling.Site)
 nn$Phase <- as.factor(nn$Phase)
 
-# Run ANOVA
-nn_anova = aov(n.Nonane ~ Sampling.Site * Phase, data = nn)
+#run regular anova to see if there's differences between sampling sites at the same phases to justify repeated measures (SIGNIFICANCE HERE)
+nn_anova = aov(n.Nonane ~ Sampling.Site, data = nn)
 summary(nn_anova)
 
 # Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
@@ -903,33 +1426,55 @@ leveneTest(n.Nonane ~ Sampling.Site * Phase, data = nn)
 
 # Log-transform and check distribution with histogram and tests
 nn$log_n.Nonane <- log(nn$n.Nonane)
-hist(nn)
+hist(nn$log_n.Nonane)
 leveneTest(log_n.Nonane ~ Sampling.Site * Phase, data = nn) # not sig anymore
 
-# Re-run ANOVA with transformed values
-nn_anova = aov(log_n.Nonane ~ Sampling.Site * Phase, data = nn)
-summary(nn_anova)
-capture.output(nn_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/nonane_anova_comm")
+# run rmANOVA with transformed values
+nn_lmer = lmer(log_n.Nonane ~ Phase + (1|Sampling.Site), data = nn)
+anova(nn_lmer)
+nn_emmeans = emmeans(nn_lmer, list(pairwise ~ Phase), adjust = "bonferroni")
+nn_emmeans
+capture.output(nn_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/nnonane_emmeans_comm")
 
-# Tukey's post-hoc
-nn_tukey = TukeyHSD(x = nn_anova, conf.level = 0.95)
-capture.output(nn_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/nonane_tukey_comm")
-nn_tukey
+qqnorm(residuals(nn_lmer))
+qqline(residuals(nn_lmer), col=2)
+
+## get back normalized emmeans for reporting in tables ##
+
+# Extract emmeans for the Phase variable
+phase_emmeans <- emmeans(nn_lmer, ~ Phase)
+
+# Compute pairwise contrasts
+pairwise_phase <- contrast(phase_emmeans, method = "pairwise", adjust = "bonferroni")
+
+# Convert contrasts to a data frame
+pairwise_phase_df <- as.data.frame(pairwise_phase)
+
+# Modify estimates for specific comparisons and back-transform
+pairwise_phase <- pairwise_phase_df %>%
+  mutate(
+    adjusted_estimate = ifelse(
+      contrast %in% c("none - pre", "none - prod"), 
+      -1 * estimate, 
+      estimate
+    ),
+    original_scale_estimate = 10^(adjusted_estimate)
+  )
 ```
 
 
-#n.decane
+# n.Decane
 ```{r}
 # Clean data and filter for n.Decane
 nd = all_clean %>%
-  select(Sampling.Site, Phase, Mud, n.Decane) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, n.Decane) %>%
   filter(Sampling.Site == "Wildgrass" | Sampling.Site == "Anthem")
 
 nd$Sampling.Site <- as.factor(nd$Sampling.Site)
 nd$Phase <- as.factor(nd$Phase)
 
-# Run ANOVA
-nd_anova = aov(n.Decane ~ Sampling.Site * Phase, data = nd)
+#run regular anova to see if there's differences between sampling sites at the same phases to justify repeated measures (SIGNIFICANCE HERE)
+nd_anova = aov(n.Decane ~ Sampling.Site, data = nd)
 summary(nd_anova)
 
 # Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
@@ -940,34 +1485,55 @@ leveneTest(n.Decane ~ Sampling.Site * Phase, data = nd)
 
 # Log-transform and check distribution with histogram and tests
 nd$log_n.Decane <- log(nd$n.Decane)
-hist(nd)
-leveneTest(log_n.Decane ~ Sampling.Site * Phase, data = nd) # Reduced by orders of magnitude, so good enough
+hist(nd$log_n.Decane)
+leveneTest(log_n.Decane ~ Sampling.Site * Phase, data = nd) # not sig anymore
 
-# Re-run ANOVA with transformed values
-nd_anova = aov(log_n.Decane ~ Sampling.Site * Phase, data = nd)
-summary(nd_anova)
-capture.output(nd_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/decane_anova_comm")
+# run rmANOVA with transformed values
+nd_lmer = lmer(log_n.Decane ~ Phase + (1|Sampling.Site), data = nd)
+anova(nd_lmer)
+nd_emmeans = emmeans(nd_lmer, list(pairwise ~ Phase), adjust = "bonferroni")
+nd_emmeans
+capture.output(nd_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/ndecane_emmeans_comm")
 
-# Tukey's post-hoc
-nd_tukey = TukeyHSD(x = nd_anova, conf.level = 0.95)
-capture.output(nd_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/decane_tukey_comm")
-nd_tukey
+qqnorm(residuals(nd_lmer))
+qqline(residuals(nd_lmer), col=2)
 
+## get back normalized emmeans for reporting in tables ##
+
+# Extract emmeans for the Phase variable
+phase_emmeans <- emmeans(nd_lmer, ~ Phase)
+
+# Compute pairwise contrasts
+pairwise_phase <- contrast(phase_emmeans, method = "pairwise", adjust = "bonferroni")
+
+# Convert contrasts to a data frame
+pairwise_phase_df <- as.data.frame(pairwise_phase)
+
+# Modify estimates for specific comparisons and back-transform
+pairwise_phase <- pairwise_phase_df %>%
+  mutate(
+    adjusted_estimate = ifelse(
+      contrast %in% c("none - pre", "none - prod"), 
+      -1 * estimate, 
+      estimate
+    ),
+    original_scale_estimate = 10^(adjusted_estimate)
+  )
 ```
 
 
-#TCE
+# TCE
 ```{r}
 # Clean data and filter for TCE
 tce = all_clean %>%
-  select(Sampling.Site, Phase, Mud, TCE) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, TCE) %>%
   filter(Sampling.Site == "Wildgrass" | Sampling.Site == "Anthem")
 
 tce$Sampling.Site <- as.factor(tce$Sampling.Site)
 tce$Phase <- as.factor(tce$Phase)
 
-# Run ANOVA
-tce_anova = aov(TCE ~ Sampling.Site * Phase, data = tce)
+#run regular anova to see if there's differences between sampling sites at the same phases to justify repeated measures
+tce_anova = aov(TCE ~ Sampling.Site, data = tce)
 summary(tce_anova)
 
 # Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
@@ -978,110 +1544,114 @@ leveneTest(TCE ~ Sampling.Site * Phase, data = tce)
 
 # Log-transform and check distribution with histogram and tests
 tce$log_TCE <- log(tce$TCE)
-hist(tce)
+hist(tce$log_TCE)
 leveneTest(log_TCE ~ Sampling.Site * Phase, data = tce) # Reduced by orders of magnitude, so good enough
 
-# Re-run ANOVA with transformed values
-tce_anova = aov(log_TCE ~ Sampling.Site * Phase, data = tce)
-summary(tce_anova)
-capture.output(tce_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/tce_anova_comm")
+# run rmANOVA with transformed values
+tce_lmer = lmer(log_TCE ~ Phase + (1|Sampling.Site), data = tce)
+anova(tce_lmer)
+tce_emmeans = emmeans(tce_lmer, list(pairwise ~ Phase), adjust = "bonferroni")
+tce_emmeans
+capture.output(tce_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/tce_emmeans_comm")
 
-# Tukey's post-hoc
-tce_tukey = TukeyHSD(x = tce_anova, conf.level = 0.95)
-capture.output(tce_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/tce_tukey_comm")
-tce_tukey
+qqnorm(residuals(tce_lmer))
+qqline(residuals(tce_lmer), col=2)
 
+## get back normalized emmeans for reporting in tables ##
+
+# Extract emmeans for the Phase variable
+phase_emmeans <- emmeans(tce_lmer, ~ Phase)
+
+# Compute pairwise contrasts
+pairwise_phase <- contrast(phase_emmeans, method = "pairwise", adjust = "bonferroni")
+
+# Convert contrasts to a data frame
+pairwise_phase_df <- as.data.frame(pairwise_phase)
+
+# Modify estimates for specific comparisons and back-transform
+pairwise_phase <- pairwise_phase_df %>%
+  mutate(
+    adjusted_estimate = ifelse(
+      contrast %in% c("none - pre", "none - prod"), 
+      -1 * estimate, 
+      estimate
+    ),
+    original_scale_estimate = 10^(adjusted_estimate)
+  )
 ```
 
 
-
-#PCE
+# PCE
 ```{r}
 # Clean data and filter for PCE
-PCE_data = all_clean %>%
-  select(Sampling.Site, Phase, Mud, PCE) %>%
+pce = all_clean %>%
+  dplyr::select(Sampling.Site, Phase, Mud, PCE) %>%
   filter(Sampling.Site == "Wildgrass" | Sampling.Site == "Anthem")
 
-PCE_data$Sampling.Site <- as.factor(PCE_data$Sampling.Site)
-PCE_data$Phase <- as.factor(PCE_data$Phase)
+pce$Sampling.Site <- as.factor(pce$Sampling.Site)
+pce$Phase <- as.factor(pce$Phase)
 
-# Run ANOVA
-PCE_anova = aov(PCE ~ Sampling.Site * Phase, data = PCE_data)
-summary(PCE_anova)
+#run regular anova to see if there's differences between sampling sites at the same phases to justify repeated measures
+pce_anova = aov(PCE ~ Sampling.Site, data = pce)
+summary(pce_anova)
 
 # Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
-shapiro.test(PCE_anova$residuals)
+shapiro.test(pce_anova$residuals)
 
 # Levene's Test for homogeneity of variances (p < 0.05, variances are not homogenous)
-leveneTest(PCE ~ Sampling.Site * Phase, data = PCE_data)
+leveneTest(PCE ~ Sampling.Site * Phase, data = pce)
 
 # Log-transform and check distribution with histogram and tests
-PCE_data$log_PCE <- log(PCE_data$PCE)
-hist(PCE_data)
-leveneTest(log_PCE ~ Sampling.Site * Phase, data = PCE_data) # decreased p value and data not more normal, so using that for ANOVA
+pce$log_PCE <- log(pce$PCE)
+hist(pce$log_PCE)
+leveneTest(log_PCE ~ Sampling.Site * Phase, data = pce) # didn't change much but distribution more normal
 
-capture.output(PCE_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/PCE_anova_comm")
+# run rmANOVA with transformed values
+pce_lmer = lmer(log_PCE ~ Phase + (1|Sampling.Site), data = pce)
+anova(pce_lmer)
+pce_emmeans = emmeans(pce_lmer, list(pairwise ~ Phase), adjust = "bonferroni")
+pce_emmeans
+capture.output(pce_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/pce_emmeans_comm")
 
-# Tukey's post-hoc
-PCE_tukey = TukeyHSD(x = PCE_anova, conf.level = 0.95)
-capture.output(PCE_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/PCE_tukey_comm")
-PCE_tukey
+qqnorm(residuals(pce_lmer))
+qqline(residuals(pce_lmer), col=2)
 
+## get back normalized emmeans for reporting in tables ##
+
+# Extract emmeans for the Phase variable
+phase_emmeans <- emmeans(pce_lmer, ~ Phase)
+
+# Compute pairwise contrasts
+pairwise_phase <- contrast(phase_emmeans, method = "pairwise", adjust = "bonferroni")
+
+# Convert contrasts to a data frame
+pairwise_phase_df <- as.data.frame(pairwise_phase)
+
+# Modify estimates for specific comparisons and back-transform
+pairwise_phase <- pairwise_phase_df %>%
+  mutate(
+    adjusted_estimate = ifelse(
+      contrast %in% c("none - pre", "none - prod"), 
+      -1 * estimate, 
+      estimate
+    ),
+    original_scale_estimate = 10^(adjusted_estimate)
+  )
 ```
 
 
-
-#propene
-```{r}
-# Clean data and filter for Propene
-pro = all_clean %>%
-  select(Sampling.Site, Phase, Mud, Propene) %>%
-  filter(Sampling.Site == "Wildgrass" | Sampling.Site == "Anthem")
-
-pro$Sampling.Site <- as.factor(pro$Sampling.Site)
-pro$Phase <- as.factor(pro$Phase)
-
-# Run ANOVA
-pro_anova = aov(Propene ~ Sampling.Site * Phase, data = pro)
-summary(pro_anova)
-
-# Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
-shapiro.test(pro_anova$residuals)
-
-# Levene's Test for homogeneity of variances (p < 0.05, variances are not homogenous)
-leveneTest(Propene ~ Sampling.Site * Phase, data = pro)
-
-# Log-transform and check distribution with histogram and tests
-pro$log_Propene <- log(pro$Propene)
-hist(pro)
-leveneTest(log_Propene ~ Sampling.Site * Phase, data = pro) # decreased p value but data way more normalized, so using log transformed
-
-# Re-run ANOVA with transformed values
-pro_anova = aov(log_Propene ~ Sampling.Site * Phase, data = pro)
-summary(pro_anova)
-capture.output(pro_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/Propene_anova_comm")
-
-# Tukey's post-hoc
-pro_tukey = TukeyHSD(x = pro_anova, conf.level = 0.95)
-capture.output(pro_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/Propene_tukey_comm")
-pro_tukey
-
-```
-
-
-
-#aliphatic_low
+# Aliphatic_low
 ```{r}
 # Clean data and filter for Aliphatic_low
 aliph = all_clean %>%
-  select(Sampling.Site, Phase, Mud, Aliphatic_low) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, Aliphatic_low) %>%
   filter(Sampling.Site == "Wildgrass" | Sampling.Site == "Anthem")
 
 aliph$Sampling.Site <- as.factor(aliph$Sampling.Site)
 aliph$Phase <- as.factor(aliph$Phase)
 
-# Run ANOVA
-aliph_anova = aov(Aliphatic_low ~ Sampling.Site * Phase, data = aliph)
+#run regular anova to see if there's differences between sampling sites at the same phases to justify repeated measures (SIGNIFICANCE HERE)
+aliph_anova = aov(Aliphatic_low ~ Sampling.Site, data = aliph)
 summary(aliph_anova)
 
 # Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
@@ -1092,34 +1662,56 @@ leveneTest(Aliphatic_low ~ Sampling.Site * Phase, data = aliph)
 
 # Log-transform and check distribution with histogram and tests
 aliph$log_Aliphatic_low <- log(aliph$Aliphatic_low)
-hist(aliph)
+hist(aliph$log_Aliphatic_low)
 leveneTest(log_Aliphatic_low ~ Sampling.Site * Phase, data = aliph) # Reduced by orders of magnitude, so good enough
 
-# Re-run ANOVA with transformed values
-aliph_anova = aov(log_Aliphatic_low ~ Sampling.Site * Phase, data = aliph)
-summary(aliph_anova)
-capture.output(aliph_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/Aliphatic_low_anova_comm")
+# run rmANOVA with transformed values
+aliph_lmer = lmer(log_Aliphatic_low ~ Phase + (1|Sampling.Site), data = aliph)
+anova(aliph_lmer)
+aliph_emmeans = emmeans(aliph_lmer, list(pairwise ~ Phase), adjust = "bonferroni")
+aliph_emmeans
+capture.output(aliph_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/aliphaticlow_emmeans_comm")
 
-# Tukey's post-hoc
-aliph_tukey = TukeyHSD(x = aliph_anova, conf.level = 0.95)
-capture.output(aliph_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/Aliphatic_low_tukey_comm")
-aliph_tukey
+qqnorm(residuals(aliph_lmer))
+qqline(residuals(aliph_lmer), col=2)
 
+## get back normalized emmeans for reporting in tables ##
+
+# Extract emmeans for the Phase variable
+phase_emmeans <- emmeans(aliph_lmer, ~ Phase)
+
+# Compute pairwise contrasts
+pairwise_phase <- contrast(phase_emmeans, method = "pairwise", adjust = "bonferroni")
+
+# Convert contrasts to a data frame
+pairwise_phase_df <- as.data.frame(pairwise_phase)
+
+# Modify estimates for specific comparisons and back-transform
+pairwise_phase <- pairwise_phase_df %>%
+  mutate(
+    adjusted_estimate = ifelse(
+      contrast %in% c("none - pre", "none - prod"), 
+      -1 * estimate, 
+      estimate
+    ),
+    original_scale_estimate = 10^(adjusted_estimate)
+  )
 ```
 
 
-#aromatic_medium
+
+# Aromatic_medium
 ```{r}
 # Clean data and filter for Aromatic_medium
 aro = all_clean %>%
-  select(Sampling.Site, Phase, Mud, Aromatic_medium) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, Aromatic_medium) %>%
   filter(Sampling.Site == "Wildgrass" | Sampling.Site == "Anthem")
 
 aro$Sampling.Site <- as.factor(aro$Sampling.Site)
 aro$Phase <- as.factor(aro$Phase)
 
-# Run ANOVA
-aro_anova = aov(Aromatic_medium ~ Sampling.Site * Phase, data = aro)
+#run regular anova to see if there's differences between sampling sites at the same phases to justify repeated measures
+aro_anova = aov(Aromatic_medium ~ Sampling.Site, data = aro)
 summary(aro_anova)
 
 # Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
@@ -1130,20 +1722,104 @@ leveneTest(Aromatic_medium ~ Sampling.Site * Phase, data = aro)
 
 # Log-transform and check distribution with histogram and tests
 aro$log_Aromatic_medium <- log(aro$Aromatic_medium)
-hist(aro)
-leveneTest(log_Aromatic_medium ~ Sampling.Site * Phase, data = aro) # p value decreased and data not much more normal so using original values
+hist(aro$log_Aromatic_medium)
+leveneTest(log_Aromatic_medium ~ Sampling.Site * Phase, data = aro) # didn't change but distribution more normal
 
-capture.output(aro_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/Aromatic_medium_anova_comm")
+# run rmANOVA with transformed values
+aro_lmer = lmer(log_Aromatic_medium ~ Phase + (1|Sampling.Site), data = aro)
+anova(aro_lmer)
+aro_emmeans = emmeans(aro_lmer, list(pairwise ~ Phase), adjust = "bonferroni")
+aro_emmeans
+capture.output(aro_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/aromaticmed_emmeans_comm")
 
-# Tukey's post-hoc
-aro_tukey = TukeyHSD(x = aro_anova, conf.level = 0.95)
-capture.output(aro_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/Aromatic_medium_tukey_comm")
-aro_tukey
+qqnorm(residuals(aro_lmer))
+qqline(residuals(aro_lmer), col=2)
 
+## get back normalized emmeans for reporting in tables ##
+
+# Extract emmeans for the Phase variable
+phase_emmeans <- emmeans(aro_lmer, ~ Phase)
+
+# Compute pairwise contrasts
+pairwise_phase <- contrast(phase_emmeans, method = "pairwise", adjust = "bonferroni")
+
+# Convert contrasts to a data frame
+pairwise_phase_df <- as.data.frame(pairwise_phase)
+
+# Modify estimates for specific comparisons and back-transform
+pairwise_phase <- pairwise_phase_df %>%
+  mutate(
+    adjusted_estimate = ifelse(
+      contrast %in% c("none - pre", "none - prod"), 
+      -1 * estimate, 
+      estimate
+    ),
+    original_scale_estimate = 10^(adjusted_estimate)
+  )
 ```
 
 
-## mud statistics
+# propene
+```{r}
+# Clean data and filter for Aromatic_medium
+pro = all_clean %>%
+  dplyr::select(Sampling.Site, Phase, Mud, Propene) %>%
+  filter(Sampling.Site == "Wildgrass" | Sampling.Site == "Anthem")
+
+pro$Sampling.Site <- as.factor(pro$Sampling.Site)
+pro$Phase <- as.factor(pro$Phase)
+
+#run regular anova to see if there's differences between sampling sites at the same phases to justify repeated measures
+pro_anova = aov(Propene ~ Sampling.Site, data = pro)
+summary(pro_anova)
+
+# Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
+shapiro.test(pro_anova$residuals)
+
+# Levene's Test for homogeneity of variances (p > 0.05, variances are homogenous)
+leveneTest(Propene ~ Sampling.Site * Phase, data = pro)
+
+# Log-transform and check distribution with histogram and tests
+pro$log_Propene <- log(pro$Propene)
+hist(pro$log_Propene)
+leveneTest(log_Propene ~ Sampling.Site * Phase, data = pro) # didn't change, which is good, and distribution more normal
+
+# run rmANOVA with transformed values
+pro_lmer = lmer(log_Propene ~ Phase + (1|Sampling.Site), data = pro)
+anova(pro_lmer)
+pro_emmeans = emmeans(pro_lmer, list(pairwise ~ Phase), adjust = "bonferroni")
+pro_emmeans
+capture.output(pro_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/propene_emmeans_comm")
+
+qqnorm(residuals(pro_lmer))
+qqline(residuals(pro_lmer), col=2)
+
+## get back normalized emmeans for reporting in tables ##
+
+# Extract emmeans for the Phase variable
+phase_emmeans <- emmeans(pro_lmer, ~ Phase)
+
+# Compute pairwise contrasts
+pairwise_phase <- contrast(phase_emmeans, method = "pairwise", adjust = "bonferroni")
+
+# Convert contrasts to a data frame
+pairwise_phase_df <- as.data.frame(pairwise_phase)
+
+# Modify estimates for specific comparisons and back-transform
+pairwise_phase <- pairwise_phase_df %>%
+  mutate(
+    adjusted_estimate = ifelse(
+      contrast %in% c("none - pre", "none - prod"), 
+      -1 * estimate, 
+      estimate
+    ),
+    original_scale_estimate = 10^(adjusted_estimate)
+  )
+```
+
+
+
+## mud statistics##
 
 #benzene
 ```{r}
@@ -1155,380 +1831,387 @@ ben = all_clean %>%
 ben$Sampling.Site <- as.factor(ben$Sampling.Site)
 ben$Mud <- as.factor(ben$Mud)
 
-# Run ANOVA
-ben_anova = aov(Benzene ~ Sampling.Site * Mud, data = ben)
+#run regular anova 
+ben_anova = aov(Benzene ~ Mud, data = ben)
 summary(ben_anova)
 
-# Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
+#Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
 shapiro.test(ben_anova$residuals)
 
-# Levene's Test for homogeneity of variances (p < 0.05, variances are not homogenous)
-leveneTest(Benzene ~ Sampling.Site * Mud, data = ben)
+#Levene's Test for homogeneity of variances (p < 0.1, variances are maybe not homogenous)
+leveneTest(Benzene ~ Mud, data = ben)
 
-# Log-transform and check distribution with histogram and tests
+#log-transform and check distribution with histogram and tests
 ben$log_Benzene <- log(ben$Benzene)
-hist(ben)
-leveneTest(log_Benzene ~ Sampling.Site * Mud, data = ben) # not significant anymore
+hist(ben$log_Benzene)
+leveneTest(log_Benzene ~ Mud, data = ben) #not sig anymore
 
-# Re-run ANOVA with transformed values
-ben_anova = aov(log_Benzene ~ Sampling.Site * Mud, data = ben)
-summary(ben_anova)
-capture.output(ben_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/benzene_anova_mud")
+#run rmANOVA with transformed values
+ben_lmer = lmer(log_Benzene ~ Mud + (1|Sampling.Site), data = ben)
+anova(ben_lmer)
+ben_emmeans = emmeans(ben_lmer, list(pairwise ~ Mud), adjust = "bonferroni")
+ben_emmeans
+capture.output(ben_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/benzene_emmeans_mud")
 
-# Tukey's post-hoc
-ben_tukey = TukeyHSD(x = ben_anova, conf.level = 0.95)
-capture.output(ben_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/benzene_tukey_mud")
-ben_tukey
+qqnorm(residuals(ben_lmer))
+qqline(residuals(ben_lmer), col=2)
+
+#n for each mud
+mudn <- ben %>%
+  group_by(Mud) %>%
+  summarise(n = n())
+
+write.csv(mudn, file = "~/CO_CRA/CO_CRA/Output/Air_Data/n_bymud.csv")
 ```
 
 
 #toluene
 ```{r}
-# Clean data and filter for Toluene
+#clean data and filter for toluene
 tol = all_clean %>%
-  select(Sampling.Site, Phase, Mud, Toluene) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, Toluene) %>%
   filter(Phase == "drilling")
 
 tol$Sampling.Site <- as.factor(tol$Sampling.Site)
-tol$Mud <- as.factor(tol$Mud)
+tol$Phase <- as.factor(tol$Phase)
 
-# Run ANOVA
-tol_anova = aov(Toluene ~ Sampling.Site * Mud, data = tol)
+#run regular anova 
+tol_anova = aov(Toluene ~ Mud, data = tol)
 summary(tol_anova)
 
-# Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
+#Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
 shapiro.test(tol_anova$residuals)
 
-# Levene's Test for homogeneity of variances (p > 0.05, variances are homogenous)
-leveneTest(Toluene ~ Sampling.Site * Mud, data = tol)
+#Levene's Test for homogeneity of variances (p < 0.1, variances are maybe not homogenous)
+leveneTest(Toluene ~ Mud, data = tol)
 
-# Log-transform and check distribution with histogram and tests
+#log-transform and check distribution with histogram and tests
 tol$log_Toluene <- log(tol$Toluene)
-hist(tol)
-leveneTest(log_Toluene ~ Sampling.Site * Mud, data = tol) # no change but data more normal, so transforming
+hist(tol$log_Toluene)
+leveneTest(log_Toluene ~ Mud, data = tol) #not sig anymore
 
-# Re-run ANOVA with transformed values
-tol_anova = aov(log_Toluene ~ Sampling.Site * Mud, data = tol)
-summary(tol_anova)
-capture.output(tol_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/toluene_anova_mud")
+#run rmANOVA with transformed values
+tol_lmer = lmer(log_Toluene ~ Mud + (1|Sampling.Site), data = tol)
+anova(tol_lmer)
+tol_emmeans = emmeans(tol_lmer, list(pairwise ~ Mud), adjust = "bonferroni")
+tol_emmeans
+capture.output(tol_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/toluene_emmeans_mud")
 
-# Tukey's post-hoc
-tol_tukey = TukeyHSD(x = tol_anova, conf.level = 0.95)
-capture.output(tol_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/toluene_tukey_mud")
-tol_tukey
-
+qqnorm(residuals(tol_lmer))
+qqline(residuals(tol_lmer), col=2)
 ```
 
 
-#ethylbenzene
+
+# Ethylbenzene
 ```{r}
 # Clean data and filter for Ethylbenzene
 eb = all_clean %>%
-  select(Sampling.Site, Phase, Mud, Ethylbenzene) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, Ethylbenzene) %>%
   filter(Phase == "drilling")
 
 eb$Sampling.Site <- as.factor(eb$Sampling.Site)
-eb$Mud <- as.factor(eb$Mud)
+eb$Phase <- as.factor(eb$Phase)
 
-# Run ANOVA
-eb_anova = aov(Ethylbenzene ~ Sampling.Site * Mud, data = eb)
+#run regular anova 
+eb_anova = aov(Ethylbenzene ~ Mud, data = eb)
 summary(eb_anova)
 
-# Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
+#Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
 shapiro.test(eb_anova$residuals)
 
-# Levene's Test for homogeneity of variances (p > 0.05, variances are homogenous)
-leveneTest(Ethylbenzene ~ Sampling.Site * Mud, data = eb)
+#Levene's Test for homogeneity of variances (p < 0.1, variances are maybe not homogenous)
+leveneTest(Ethylbenzene ~ Mud, data = eb)
 
-# Log-transform and check distribution with histogram and tests
+#log-transform and check distribution with histogram and tests
 eb$log_Ethylbenzene <- log(eb$Ethylbenzene)
-hist(eb)
-leveneTest(log_Ethylbenzene ~ Sampling.Site * Mud, data = eb) # no change but data more normal, so transforming
+hist(eb$log_Ethylbenzene)
+leveneTest(log_Ethylbenzene ~ Mud, data = eb) #marginally better, but distribution more normal
 
-# Re-run ANOVA with transformed values
-eb_anova = aov(log_Ethylbenzene ~ Sampling.Site * Mud, data = eb)
-summary(eb_anova)
-capture.output(eb_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/ethylbenzene_anova_mud")
+#run rmANOVA with transformed values
+eb_lmer = lmer(log_Ethylbenzene ~ Mud + (1|Sampling.Site), data = eb)
+anova(eb_lmer)
+eb_emmeans = emmeans(eb_lmer, list(pairwise ~ Mud), adjust = "bonferroni")
+eb_emmeans
+capture.output(eb_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/ethylbenzene_emmeans_mud")
 
-# Tukey's post-hoc
-eb_tukey = TukeyHSD(x = eb_anova, conf.level = 0.95)
-capture.output(eb_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/ethylbenzene_tukey_mud")
-eb_tukey
+qqnorm(residuals(eb_lmer))
+qqline(residuals(eb_lmer), col=2)
 
 ```
 
 
-#xylenes
+# Xylenes
 ```{r}
 # Clean data and filter for Xylenes
 xyl = all_clean %>%
-  select(Sampling.Site, Phase, Mud, Xylenes) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, Xylenes) %>%
   filter(Phase == "drilling")
 
 xyl$Sampling.Site <- as.factor(xyl$Sampling.Site)
-xyl$Mud <- as.factor(xyl$Mud)
+xyl$Phase <- as.factor(xyl$Phase)
 
-# Run ANOVA
-xyl_anova = aov(Xylenes ~ Sampling.Site * Mud, data = xyl)
+#run regular anova 
+xyl_anova = aov(Xylenes ~ Mud, data = xyl)
 summary(xyl_anova)
 
-# Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
+#Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
 shapiro.test(xyl_anova$residuals)
 
-# Levene's Test for homogeneity of variances (p < 0.05, variances are not homogenous)
-leveneTest(Xylenes ~ Sampling.Site * Mud, data = xyl)
+#Levene's Test for homogeneity of variances (p < 0.1, variances are maybe not homogenous)
+leveneTest(Xylenes ~ Mud, data = xyl)
 
-# Log-transform and check distribution with histogram and tests
+#log-transform and check distribution with histogram and tests
 xyl$log_Xylenes <- log(xyl$Xylenes)
-hist(xyl)
-leveneTest(log_Xylenes ~ Sampling.Site * Mud, data = xyl) # no change but data more normal, so transforming
+hist(xyl$log_Xylenes)
+leveneTest(log_Xylenes ~ Mud, data = xyl) #no change but distribution more normal
 
-# Re-run ANOVA with transformed values
-xyl_anova = aov(log_Xylenes ~ Sampling.Site * Mud, data = xyl)
-summary(xyl_anova)
-capture.output(xyl_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/xylenes_anova_mud")
+#run rmANOVA with transformed values
+xyl_lmer = lmer(log_Xylenes ~ Mud + (1|Sampling.Site), data = xyl)
+anova(xyl_lmer)
+xyl_emmeans = emmeans(xyl_lmer, list(pairwise ~ Mud), adjust = "bonferroni")
+xyl_emmeans
+capture.output(xyl_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/xylenes_emmeans_mud")
 
-# Tukey's post-hoc
-xyl_tukey = TukeyHSD(x = xyl_anova, conf.level = 0.95)
-capture.output(xyl_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/xylenes_tukey_mud")
-xyl_tukey
-
+qqnorm(residuals(xyl_lmer))
+qqline(residuals(xyl_lmer), col=2)
 ```
-
 
 
 #styrene: no gibson to compare
 
 
-#n.nonane
+# n.Nonane
 ```{r}
 # Clean data and filter for n.Nonane
 nn = all_clean %>%
-  select(Sampling.Site, Phase, Mud, n.Nonane) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, n.Nonane) %>%
   filter(Phase == "drilling")
 
 nn$Sampling.Site <- as.factor(nn$Sampling.Site)
-nn$Mud <- as.factor(nn$Mud)
+nn$Phase <- as.factor(nn$Phase)
 
-# Run ANOVA
-nn_anova = aov(n.Nonane ~ Sampling.Site * Mud, data = nn)
+#run regular anova 
+nn_anova = aov(n.Nonane ~ Mud, data = nn)
 summary(nn_anova)
 
-# Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
+#Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
 shapiro.test(nn_anova$residuals)
 
-# Levene's Test for homogeneity of variances (p < 0.05, variances are not homogenous)
-leveneTest(n.Nonane ~ Sampling.Site * Mud, data = nn)
+#Levene's Test for homogeneity of variances (p < 0.05, variances are not homogenous)
+leveneTest(n.Nonane ~ Mud, data = nn)
 
-# Log-transform and check distribution with histogram and tests
+#log-transform and check distribution with histogram and tests
 nn$log_n.Nonane <- log(nn$n.Nonane)
-hist(nn)
-leveneTest(log_n.Nonane ~ Sampling.Site * Mud, data = nn) # not sig anymore
+hist(nn$log_n.Nonane)
+leveneTest(log_n.Nonane ~ Mud, data = nn) #orders of magnitude better, good enough
 
-# Re-run ANOVA with transformed values
-nn_anova = aov(log_n.Nonane ~ Sampling.Site * Mud, data = nn)
-summary(nn_anova)
-capture.output(nn_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/nonane_anova_mud")
+#run rmANOVA with transformed values
+nn_lmer = lmer(log_n.Nonane ~ Mud + (1|Sampling.Site), data = nn)
+anova(nn_lmer)
+nn_emmeans = emmeans(nn_lmer, list(pairwise ~ Mud), adjust = "bonferroni")
+nn_emmeans
+capture.output(nn_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/nnonane_emmeans_mud")
 
-# Tukey's post-hoc
-nn_tukey = TukeyHSD(x = nn_anova, conf.level = 0.95)
-capture.output(nn_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/nonane_tukey_mud")
-nn_tukey
-
+qqnorm(residuals(nn_lmer))
+qqline(residuals(nn_lmer), col=2)
 ```
 
 
-#n.decane
+# n.Decane 
 ```{r}
 # Clean data and filter for n.Decane
 nd = all_clean %>%
-  select(Sampling.Site, Phase, Mud, n.Decane) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, n.Decane) %>%
   filter(Phase == "drilling")
 
 nd$Sampling.Site <- as.factor(nd$Sampling.Site)
-nd$Mud <- as.factor(nd$Mud)
+nd$Phase <- as.factor(nd$Phase)
 
-# Run ANOVA
-nd_anova = aov(n.Decane ~ Sampling.Site * Mud, data = nd)
+#run regular anova 
+nd_anova = aov(n.Decane ~ Mud, data = nd)
 summary(nd_anova)
 
-# Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
+#Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
 shapiro.test(nd_anova$residuals)
 
-# Levene's Test for homogeneity of variances (p < 0.05, variances are not homogenous)
-leveneTest(n.Decane ~ Sampling.Site * Mud, data = nd)
+#Levene's Test for homogeneity of variances (p < 0.05, variances are not homogenous)
+leveneTest(n.Decane ~ Mud, data = nd)
 
-# Log-transform and check distribution with histogram and tests
+#log-transform and check distribution with histogram and tests
 nd$log_n.Decane <- log(nd$n.Decane)
-hist(nd)
-leveneTest(log_n.Decane ~ Sampling.Site * Mud, data = nd) # not sig anymore
+hist(nd$log_n.Decane)
+leveneTest(log_n.Decane ~ Mud, data = nd) #not sig anymore
 
-# Re-run ANOVA with transformed values
-nd_anova = aov(log_n.Decane ~ Sampling.Site * Mud, data = nd)
-summary(nd_anova)
-capture.output(nd_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/decane_anova_mud")
+#run rmANOVA with transformed values
+nd_lmer = lmer(log_n.Decane ~ Mud + (1|Sampling.Site), data = nd)
+anova(nd_lmer)
+nd_emmeans = emmeans(nd_lmer, list(pairwise ~ Mud), adjust = "bonferroni")
+nd_emmeans
+capture.output(nd_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/ndecane_emmeans_mud")
 
-# Tukey's post-hoc
-nd_tukey = TukeyHSD(x = nd_anova, conf.level = 0.95)
-capture.output(nd_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/decane_tukey_mud")
-nd_tukey
-
+qqnorm(residuals(nd_lmer))
+qqline(residuals(nd_lmer), col=2)
 ```
 
-#TCE
+
+# TCE 
 ```{r}
 # Clean data and filter for TCE
 tce = all_clean %>%
-  select(Sampling.Site, Phase, Mud, TCE) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, TCE) %>%
   filter(Phase == "drilling")
 
 tce$Sampling.Site <- as.factor(tce$Sampling.Site)
-tce$Mud <- as.factor(tce$Mud)
+tce$Phase <- as.factor(tce$Phase)
 
-# Run ANOVA
-tce_anova = aov(TCE ~ Sampling.Site * Mud, data = tce)
+#run regular anova 
+tce_anova = aov(TCE ~ Mud, data = tce)
 summary(tce_anova)
 
-# Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
+#Shapiro-Wilk test for normality (p <0.05, data is not normally distributed)
 shapiro.test(tce_anova$residuals)
 
-# Levene's Test for homogeneity of variances (p < 0.05, variances are not homogenous)
-leveneTest(TCE ~ Sampling.Site * Mud, data = tce)
+#Levene's Test for homogeneity of variances (p > 0.05, variances are homogenous)
+leveneTest(TCE ~ Mud, data = tce)
 
-# Log-transform and check distribution with histogram and tests
+#log-transform and check distribution with histogram and tests
 tce$log_TCE <- log(tce$TCE)
-hist(tce)
-leveneTest(log_TCE ~ Sampling.Site * Mud, data = tce) # not sig anymore
+hist(tce$log_TCE)
+leveneTest(log_TCE ~ Mud, data = tce) #now p < 0.05, but data is more normally distributed
 
-# Re-run ANOVA with transformed values
-tce_anova = aov(log_TCE ~ Sampling.Site * Mud, data = tce)
-summary(tce_anova)
-capture.output(tce_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/tce_anova_mud")
+#run rmANOVA with transformed values
+tce_lmer = lmer(log_TCE ~ Mud + (1|Sampling.Site), data = tce)
+anova(tce_lmer)
+tce_emmeans = emmeans(tce_lmer, list(pairwise ~ Mud), adjust = "bonferroni")
+tce_emmeans
+capture.output(tce_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/tce_emmeans_mud")
 
-# Tukey's post-hoc
-tce_tukey = TukeyHSD(x = tce_anova, conf.level = 0.95)
-capture.output(tce_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/tce_tukey_mud")
-tce_tukey
-
+qqnorm(residuals(tce_lmer))
+qqline(residuals(tce_lmer), col=2)
 ```
 
-#PCE
+
+# PCE 
 ```{r}
 # Clean data and filter for PCE
 pce = all_clean %>%
-  select(Sampling.Site, Phase, Mud, PCE) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, PCE) %>%
   filter(Phase == "drilling")
 
 pce$Sampling.Site <- as.factor(pce$Sampling.Site)
-pce$Mud <- as.factor(pce$Mud)
+pce$Phase <- as.factor(pce$Phase)
 
-# Run ANOVA
-pce_anova = aov(PCE ~ Sampling.Site * Mud, data = pce)
+#run regular anova 
+pce_anova = aov(PCE ~ Mud, data = pce)
 summary(pce_anova)
 
-# Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
+#Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
 shapiro.test(pce_anova$residuals)
 
-# Levene's Test for homogeneity of variances (p < 0.05, variances are not homogenous)
-leveneTest(PCE ~ Sampling.Site * Mud, data = pce)
+#Levene's Test for homogeneity of variances (p < 0.05, variances are not homogenous)
+leveneTest(PCE ~ Mud, data = pce)
 
-# Log-transform and check distribution with histogram and tests
+#log-transform and check distribution with histogram and tests
 pce$log_PCE <- log(pce$PCE)
-hist(pce)
-leveneTest(log_PCE ~ Sampling.Site * Mud, data = pce) # no change but data more normal, so transforming
+hist(pce$log_PCE)
+leveneTest(log_PCE ~ Mud, data = pce) #still sig, but data more normal
 
-# Re-run ANOVA with transformed values
-pce_anova = aov(log_PCE ~ Sampling.Site * Mud, data = pce)
-summary(pce_anova)
-capture.output(pce_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/pce_anova_mud")
+#run rmANOVA with transformed values
+pce_lmer = lmer(log_PCE ~ Mud + (1|Sampling.Site), data = pce)
+anova(pce_lmer)
+pce_emmeans = emmeans(pce_lmer, list(pairwise ~ Mud), adjust = "bonferroni")
+pce_emmeans
+capture.output(pce_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/pce_emmeans_mud")
 
-# Tukey's post-hoc
-pce_tukey = TukeyHSD(x = pce_anova, conf.level = 0.95)
-capture.output(pce_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/pce_tukey_mud")
-pce_tukey
-
+qqnorm(residuals(pce_lmer))
+qqline(residuals(pce_lmer), col=2)
 ```
 
 
-#propene
-```{r}
-# Clean data and filter for Propene
-pro = all_clean %>%
-  select(Sampling.Site, Phase, Mud, Propene) %>%
-  filter(Phase == "drilling")
-
-pro$Sampling.Site <- as.factor(pro$Sampling.Site)
-pro$Mud <- as.factor(pro$Mud)
-
-# Run ANOVA
-pro_anova = aov(Propene ~ Sampling.Site * Mud, data = pro)
-summary(pro_anova)
-
-# Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
-shapiro.test(pro_anova$residuals)
-
-# Levene's Test for homogeneity of variances (p < 0.05, variances are not homogenous)
-leveneTest(Propene ~ Sampling.Site * Mud, data = pro)
-
-# Log-transform and check distribution with histogram and tests
-pro$log_Propene <- log(pro$Propene)
-hist(pro)
-leveneTest(log_Propene ~ Sampling.Site * Mud, data = pro) # not sig anymore
-
-# Re-run ANOVA with transformed values
-pro_anova = aov(log_Propene ~ Sampling.Site * Mud, data = pro)
-summary(pro_anova)
-capture.output(pro_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/propene_anova_mud")
-
-# Tukey's post-hoc
-pro_tukey = TukeyHSD(x = pro_anova, conf.level = 0.95)
-capture.output(pro_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/propene_tukey_mud")
-pro_tukey
-
-```
-
-
-#aliphatic low
+# Aliphatic_low
 ```{r}
 # Clean data and filter for Aliphatic_low
 aliph = all_clean %>%
-  select(Sampling.Site, Phase, Mud, Aliphatic_low) %>%
+  dplyr::select(Sampling.Site, Phase, Mud, Aliphatic_low) %>%
   filter(Phase == "drilling")
 
 aliph$Sampling.Site <- as.factor(aliph$Sampling.Site)
-aliph$Mud <- as.factor(aliph$Mud)
+aliph$Phase <- as.factor(aliph$Phase)
 
-# Run ANOVA
-aliph_anova = aov(Aliphatic_low ~ Sampling.Site * Mud, data = aliph)
+#run regular anova 
+aliph_anova = aov(Aliphatic_low ~ Mud, data = aliph)
 summary(aliph_anova)
 
-# Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
+#Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
 shapiro.test(aliph_anova$residuals)
 
-# Levene's Test for homogeneity of variances (p < 0.05, variances are not homogenous)
-leveneTest(Aliphatic_low ~ Sampling.Site * Mud, data = aliph)
+#Levene's Test for homogeneity of variances (p < 0.1, variances are maybe not homogenous)
+leveneTest(Aliphatic_low ~ Mud, data = aliph)
 
-# Log-transform and check distribution with histogram and tests
+#log-transform and check distribution with histogram and tests
 aliph$log_Aliphatic_low <- log(aliph$Aliphatic_low)
-hist(aliph)
-leveneTest(log_Aliphatic_low ~ Sampling.Site * Mud, data = aliph) # not sig anymore
+hist(aliph$log_Aliphatic_low)
+leveneTest(log_Aliphatic_low ~ Mud, data = aliph) #no change, but data more normal
 
-# Re-run ANOVA with transformed values
-aliph_anova = aov(log_Aliphatic_low ~ Sampling.Site * Mud, data = aliph)
-summary(aliph_anova)
-capture.output(aliph_anova, file = "~/CO_CRA/CO_CRA/Output/Air_Data/aliphatic_low_anova_mud")
+#run rmANOVA with transformed values
+aliph_lmer = lmer(log_Aliphatic_low ~ Mud + (1|Sampling.Site), data = aliph)
+anova(aliph_lmer)
+aliph_emmeans = emmeans(aliph_lmer, list(pairwise ~ Mud), adjust = "bonferroni")
+aliph_emmeans
+capture.output(aliph_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/aliphaticlow_emmeans_mud")
 
-# Tukey's post-hoc
-aliph_tukey = TukeyHSD(x = aliph_anova, conf.level = 0.95)
-capture.output(aliph_tukey, file = "~/CO_CRA/CO_CRA/Output/Air_Data/aliphatic_low_tukey_mud")
-aliph_tukey
-
+qqnorm(residuals(aliph_lmer))
+qqline(residuals(aliph_lmer), col=2)
 ```
 
-#aromatic medium: no gibson to compare
+
+
+# Aromatic_medium: no gibson to compare
+
+
+# propene
+```{r}
+# Clean data and filter for Aromatic_medium
+pro = all_clean %>%
+  dplyr::select(Sampling.Site, Phase, Mud, Propene) %>%
+  filter(Phase == "drilling")
+
+pro$Sampling.Site <- as.factor(pro$Sampling.Site)
+pro$Phase <- as.factor(pro$Phase)
+
+#run regular anova 
+pro_anova = aov(Propene ~ Mud, data = pro)
+summary(pro_anova)
+
+#Shapiro-Wilk test for normality (p < 0.05, data is not normally distributed)
+shapiro.test(pro_anova$residuals)
+
+#Levene's Test for homogeneity of variances (p < 0.05, variances are not homogenous)
+leveneTest(Propene ~ Mud, data = pro)
+
+#log-transform and check distribution with histogram and tests
+pro$log_Propene <- log(pro$Propene)
+hist(pro$log_Propene)
+leveneTest(log_Propene ~ Mud, data = pro) #no change, but data more normal
+
+#run rmANOVA with transformed values
+pro_lmer = lmer(log_Propene ~ Mud + (1|Sampling.Site), data = pro)
+anova(pro_lmer)
+pro_emmeans = emmeans(pro_lmer, list(pairwise ~ Mud), adjust = "bonferroni")
+pro_emmeans
+capture.output(pro_emmeans, file = "~/CO_CRA/CO_CRA/Output/Air_Data/propene_emmeans_mud")
+
+qqnorm(residuals(pro_lmer))
+qqline(residuals(pro_lmer), col=2)
+```
+
 
 
 ## descriptive statistics tables ##
+
+
+
 
 #add ozone to include in tables
 ```{r}
@@ -1557,7 +2240,7 @@ for (i in 1:nrow(all)) {
 
 # Select and rename columns in ozone_filtered dataframe
 ozone_filtered <- ozone_filtered %>%
-  select(Date.Local, Sampling.Site, Phase, Arithmetic.Mean) %>%
+  dplyr::select(Date.Local, Sampling.Site, Phase, Arithmetic.Mean) %>%
   rename(Date = Date.Local, Ozone = Arithmetic.Mean)
 
 # Multiply the Ozone column by 1000 to convert to ppb
@@ -1566,22 +2249,27 @@ ozone_filtered <- ozone_filtered %>%
 ```
 
 
-#summary stats by site type (community, O&G) for VOCs
+#summary stats by phase for O&G for VOCs only
 ```{r}
 
-# Create the Site_Type column
+# Create the Site_Type and Phase columns
 all <- all %>%
-  mutate(Site_Type = case_when(
-    Sampling.Site %in% c("Northwest", "Interchange", "United", "Livingston") ~ "O&G Sites",
-    Sampling.Site %in% c("Anthem", "Soaring Eagle") ~ "Community Sites",
-    Sampling.Site == "Commons" ~ "Commons",
-    TRUE ~ "Other"
-  )) %>%
-  filter(Site_Type != "Other")
+  mutate(
+    Site_Type = case_when(
+      Sampling.Site %in% c("Northwest", "Interchange", "United", "Livingston", "Commons") ~ "O&G Sites",
+      Sampling.Site %in% c("Anthem", "Soaring Eagle") ~ "Community Sites",
+      TRUE ~ "Other"
+    ),
+    Phase = case_when(
+      Sampling.Site == "Commons" ~ "Commons",
+      TRUE ~ Phase  # Retain original Phase for other rows
+    )
+  ) %>%
+  filter(Site_Type == "O&G Sites")  # Keep only O&G Sites
 
-# Calculate summary statistics
+# Calculate summary statistics by Phase
 summary_stats <- all %>%
-  group_by(Site_Type) %>%
+  group_by(Phase) %>%
   summarize(across(where(is.numeric), list(
     n = ~ sum(!is.na(.)),
     min = ~ min(., na.rm = TRUE),
@@ -1595,39 +2283,42 @@ summary_stats <- all %>%
 # Reshape the dataframe to the desired format
 reshaped_stats <- summary_stats %>%
   pivot_longer(
-    cols = -Site_Type,
+    cols = -Phase,
     names_to = "Chemical_Statistic",
     values_to = "Value"
   ) %>%
   separate(Chemical_Statistic, into = c("Chemical", "Statistic"), sep = "_(?=[^_]+$)") %>%
   pivot_wider(
-    names_from = c(Site_Type, Statistic),
+    names_from = c(Phase, Statistic),
     values_from = Value,
-    names_glue = "{Site_Type}_{Statistic}"
+    names_glue = "{Phase}_{Statistic}"
   )
 
-#save as csv
-write.csv(reshaped_stats, file = "~/CO_CRA/CO_CRA/Output/Air_Data/weekly_summary_stats_type_VOCs.csv")
-
+# Save as CSV
+write.csv(reshaped_stats, file = "~/CO_CRA/CO_CRA/Output/Air_Data/weekly_summary_stats_VOCs_OG.csv")
 ```
 
 
-#summary stats by site type for ozone
+#summary stats by phase for ozone for O&G
 ```{r}
-
-# Create the Site_Type column
+# Create the Site_Type and Phase columns
 ozone_filtered <- ozone_filtered %>%
-  mutate(Site_Type = case_when(
-    Sampling.Site %in% c("Northwest", "Interchange", "United", "Livingston") ~ "O&G Sites",
-    Sampling.Site %in% c("Anthem", "Soaring Eagle") ~ "Community Sites",
-    Sampling.Site == "Commons" ~ "Commons",
-    TRUE ~ "Other"
-  )) %>%
-  filter(Site_Type != "Other")
+  mutate(
+    Site_Type = case_when(
+      Sampling.Site %in% c("Northwest", "Interchange", "United", "Livingston", "Commons") ~ "O&G Sites",
+      Sampling.Site %in% c("Anthem", "Soaring Eagle") ~ "Community Sites",
+      TRUE ~ "Other"
+    ),
+    Phase = case_when(
+      Sampling.Site == "Commons" ~ "Commons",
+      TRUE ~ Phase  # Retain original Phase for other rows
+    )
+  ) %>%
+  filter(Site_Type == "O&G Sites")  # Keep only O&G Sites
 
-# Calculate summary statistics
+# Calculate summary statistics by Phase
 summary_stats <- ozone_filtered %>%
-  group_by(Site_Type) %>%
+  group_by(Phase) %>%
   summarize(across(Ozone, list(
     n = ~ sum(!is.na(.)),
     min = ~ min(., na.rm = TRUE),
@@ -1641,28 +2332,82 @@ summary_stats <- ozone_filtered %>%
 # Reshape the dataframe to the desired format
 reshaped_stats <- summary_stats %>%
   pivot_longer(
-    cols = -Site_Type,
+    cols = -Phase,
     names_to = "Chemical_Statistic",
     values_to = "Value"
   ) %>%
   separate(Chemical_Statistic, into = c("Chemical", "Statistic"), sep = "_(?=[^_]+$)") %>%
   pivot_wider(
-    names_from = c(Site_Type, Statistic),
+    names_from = c(Phase, Statistic),
     values_from = Value,
-    names_glue = "{Site_Type}_{Statistic}"
+    names_glue = "{Phase}_{Statistic}"
   )
 
 # Save as CSV
-write.csv(reshaped_stats, file = "~/CO_CRA/CO_CRA/Output/Air_Data/weekly_summary_stats_type_ozone.csv")
+write.csv(reshaped_stats, file = "~/CO_CRA/CO_CRA/Output/Air_Data/weekly_summary_stats_ozone_OG.csv")
 
 ```
 
 
 
-#summary stats by phase for VOCs
+## note: have to clear environment and rerun first two chunks of Rmarkdown + ozone chunk above to get correct tables for the following 3 chunks ##
+
+#add ozone to include in tables
 ```{r}
-# Calculate summary statistics grouped by Phase
-summary_stats_phase <- all %>%
+# Convert date columns to date class
+all$Start.Date.Time <- as.Date(all$Start.Date.Time)
+all$Stop.Date.Time <- as.Date(all$Stop.Date.Time)
+ozone$Date.Local <- as.Date(ozone$Date.Local)
+
+# Initialize an empty dataframe to store the results
+ozone_filtered <- data.frame()
+
+# Iterate over each row in the 'all' dataframe
+for (i in 1:nrow(all)) {
+  start_date <- all$Start.Date.Time[i]
+  stop_date <- all$Stop.Date.Time[i]
+  
+  # Filter ozone dataframe for the date range
+  filtered_ozone <- ozone %>%
+    filter(Date.Local >= start_date & Date.Local <= stop_date) %>%
+    mutate(Sampling.Site = all$Sampling.Site[i],
+           Phase = all$Phase[i])
+  
+  # Bind the filtered results to the ozone_filtered dataframe
+  ozone_filtered <- bind_rows(ozone_filtered, filtered_ozone)
+}
+
+# Select and rename columns in ozone_filtered dataframe
+ozone_filtered <- ozone_filtered %>%
+  dplyr::select(Date.Local, Sampling.Site, Phase, Arithmetic.Mean) %>%
+  rename(Date = Date.Local, Ozone = Arithmetic.Mean)
+
+# Multiply the Ozone column by 1000 to convert to ppb
+ozone_filtered <- ozone_filtered %>%
+  mutate(Ozone = Ozone * 1000)
+```
+
+
+#summary stats by phase for VOCs for community sites
+```{r}
+
+# Create the Site_Type and Phase columns
+all <- all %>%
+  mutate(
+    Site_Type = case_when(
+      Sampling.Site %in% c("Northwest", "Interchange", "United", "Livingston") ~ "O&G Sites",
+      Sampling.Site %in% c("Anthem", "Soaring Eagle", "Wildgrass") ~ "Community Sites",
+      TRUE ~ "Other"
+    ),
+    Phase = case_when(
+      Sampling.Site == "none" ~ "none",  # Treat "none" as its own Phase
+      TRUE ~ Phase  # Retain original Phase for other rows
+    )
+  ) %>%
+  filter(Site_Type == "Community Sites")  # Keep only Community Sites
+
+# Calculate summary statistics by Phase
+summary_stats <- all %>%
   group_by(Phase) %>%
   summarize(across(where(is.numeric), list(
     n = ~ sum(!is.na(.)),
@@ -1675,43 +2420,7 @@ summary_stats_phase <- all %>%
   ), .names = "{.col}_{.fn}"))
 
 # Reshape the dataframe to the desired format
-reshaped_stats_phase <- summary_stats_phase %>%
-  pivot_longer(
-    cols = -Phase,
-    names_to = "Chemical_Statistic",
-    values_to = "Value"
-  ) %>%
-  separate(Chemical_Statistic, into = c("Chemical", "Statistic"), sep = "_(?=[^_]+$)") %>%
-  pivot_wider(
-    names_from = c(Phase, Statistic),
-    values_from = Value,
-    names_glue = "{Phase}_{Statistic}"
-  )
-
-#save as csv
-write.csv(reshaped_stats_phase, file = "~/CO_CRA/CO_CRA/Output/Air_Data/weekly_summary_stats_phase_VOCs.csv")
-
-```
-
-
-
-#summary stats by phase for ozone
-```{r}
-# Calculate summary statistics grouped by Phase
-summary_stats_phase <- ozone_filtered %>%
-  group_by(Phase) %>%
-  summarize(across(Ozone, list(
-    n = ~ sum(!is.na(.)),
-    min = ~ min(., na.rm = TRUE),
-    mean = ~ mean(., na.rm = TRUE),
-    median = ~ median(., na.rm = TRUE),
-    max = ~ max(., na.rm = TRUE),
-    sd = ~ sd(., na.rm = TRUE),
-    se = ~ sd(., na.rm = TRUE) / sqrt(sum(!is.na(.)))
-  ), .names = "{.col}_{.fn}"))
-
-# Reshape the dataframe to the desired format
-reshaped_stats_phase <- summary_stats_phase %>%
+reshaped_stats <- summary_stats %>%
   pivot_longer(
     cols = -Phase,
     names_to = "Chemical_Statistic",
@@ -1725,7 +2434,59 @@ reshaped_stats_phase <- summary_stats_phase %>%
   )
 
 # Save as CSV
-write.csv(reshaped_stats_phase, file = "~/CO_CRA/CO_CRA/Output/Air_Data/weekly_summary_stats_phase_ozone.csv")
+write.csv(reshaped_stats, file = "~/CO_CRA/CO_CRA/Output/Air_Data/weekly_summary_stats_VOCs_community.csv")
+
+```
+
+
+
+#summary stats by phase for ozone for community sites
+```{r}
+# Create the Site_Type and Phase columns
+ozone_filtered <- ozone_filtered %>%
+  mutate(
+    Site_Type = case_when(
+      Sampling.Site %in% c("Northwest", "Interchange", "United", "Livingston") ~ "O&G Sites",
+      Sampling.Site %in% c("Anthem", "Soaring Eagle", "Wildgrass") ~ "Community Sites",
+      TRUE ~ "Other"
+    ),
+    Phase = case_when(
+      Sampling.Site == "none" ~ "none",  # Treat "none" as its own Phase
+      TRUE ~ Phase  # Retain original Phase for other rows
+    )
+  ) %>%
+  filter(Site_Type == "Community Sites")  # Keep only Community Sites
+
+# Calculate summary statistics by Phase
+summary_stats <- ozone_filtered %>%
+  group_by(Phase) %>%
+  summarize(across(Ozone, list(
+    n = ~ sum(!is.na(.)),
+    min = ~ min(., na.rm = TRUE),
+    mean = ~ mean(., na.rm = TRUE),
+    median = ~ median(., na.rm = TRUE),
+    max = ~ max(., na.rm = TRUE),
+    sd = ~ sd(., na.rm = TRUE),
+    se = ~ sd(., na.rm = TRUE) / sqrt(sum(!is.na(.)))
+  ), .names = "{.col}_{.fn}"))
+
+# Reshape the dataframe to the desired format
+reshaped_stats <- summary_stats %>%
+  pivot_longer(
+    cols = -Phase,
+    names_to = "Chemical_Statistic",
+    values_to = "Value"
+  ) %>%
+  separate(Chemical_Statistic, into = c("Chemical", "Statistic"), sep = "_(?=[^_]+$)") %>%
+  pivot_wider(
+    names_from = c(Phase, Statistic),
+    values_from = Value,
+    names_glue = "{Phase}_{Statistic}"
+  )
+
+# Save as CSV
+write.csv(reshaped_stats, file = "~/CO_CRA/CO_CRA/Output/Air_Data/weekly_summary_stats_ozone_community.csv")
+
 ```
 
 

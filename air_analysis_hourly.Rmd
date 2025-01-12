@@ -46,7 +46,7 @@ all$Aliphatic_low = all$n.Octane + all$i.Pentane + all$n.Pentane + all$trans_2.P
 all$Aromatic_medium = all$i.Propylbenzene + all$n.Propylbenzene + all$X3.Ethyltoluene + all$X4.Ethyltoluene + all$X1.3.5.Trimethylbenzene + all$X2.Ethyltoluene + all$X1.2.4.Trimethylbenzene + all$X1.2.3.Trimethylbenzene + all$X1.3.Diethylbenzene + all$X1.4.Diethylbenzene
 
 all_clean = all %>%
-  select(Sampling.Site, Phase, Benzene, Toluene, Ethylbenzene, Xylenes, n.Nonane, n.Decane, Aliphatic_low, Aromatic_medium, Styrene, TCE, PCE, Propene)
+  dplyr::select(Sampling.Site, Phase, Benzene, Toluene, Ethylbenzene, Xylenes, n.Nonane, n.Decane, Aliphatic_low, Aromatic_medium, Styrene, TCE, PCE, Propene)
 
 #transform to long for graphing and analysis
 all_long = all_clean %>%
@@ -56,6 +56,82 @@ all_long = all_clean %>%
 all_long$Phase = factor(all_long$Phase, levels = c("Drilling", "pre", "prod"))
 
 all_long$Chemical = factor(all_long$Chemical, levels = c("Benzene", "Toluene", "Ethylbenzene", "Xylenes", "Styrene", "n.Nonane", "n.Decane",  "TCE", "PCE", "Propene", "Aliphatic_low", "Aromatic_medium"))
+```
+
+
+
+#look at concentrations of chemicals we're interested in at different months to see if there's seasonality
+```{r}
+all_months = all %>%
+  pivot_longer(cols = c("Benzene", "Toluene", "Ethylbenzene", "Xylenes", "n.Nonane", "n.Decane", "Aliphatic_low", "Aromatic_medium", "Styrene", "TCE", "PCE", "Propene"), names_to = "Chemical", values_to = "Value") %>%
+  dplyr::select(Sampling.Site, Phase, Date, Chemical, Value) %>%
+    mutate(Date = as.Date(Date),
+         Month = format(Date, "%m"))
+
+
+# Create a column for each month where the value is included
+all_months_long <- all_months %>%
+  rowwise() %>%
+  mutate(Months.Included = list(unique(Month))) %>%
+  unnest(cols = c(Months.Included)) %>%
+  dplyr::select(-Month) %>%  
+  rename(Month = Months.Included)
+
+
+# Calculate mean and standard deviation for each chemical and month
+chemical_month_summary <- all_months_long %>%
+  dplyr::group_by(Chemical, Month) %>%
+  summarize(
+    Mean = mean(Value, na.rm = TRUE),
+    SD = sd(Value, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    Lower = Mean - SD,
+    Upper = Mean + SD
+  )
+
+# Plot with error bars
+chems_months <- ggplot(chemical_month_summary, aes(x = Month, y = Mean, group = Chemical)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(aes(ymin = Lower, ymax = Upper), width = 0.2) +
+  scale_x_discrete(limits = sprintf("%02d", 1:12), labels = month.abb) +
+  labs(
+    x = "Month",
+    y = "Value",
+    color = "Chemical"
+  ) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  facet_wrap(~ Chemical, scales = "free_y")
+
+chems_months
+
+ggsave(filename = "chems_months_hourly.png", device = "png", plot = chems_months, path = "~/CO_CRA/CO_CRA/Output/Air_Data/", width = 15, height = 12)
+
+```
+
+
+#get sample size for HI caluclations (for paper)
+```{r}
+# Define the two groups
+group1_sites <- c("Anthem", "Soaring Eagle")
+group2_sites <- c("Interchange", "Livingston", "Northwest", "United")
+
+# Calculate row counts for each phase within each group
+phase_counts <- all_clean %>%
+  mutate(
+    Site.Group = case_when(
+      Sampling.Site %in% group1_sites ~ "Group 1: Anthem and Soaring Eagle",
+      Sampling.Site %in% group2_sites ~ "Group 2: Interchange, Livingston, Northwest, United",
+      TRUE ~ "Other"
+    )
+  ) %>%
+  filter(Site.Group != "Other") %>%  # Exclude rows not in the two groups
+  group_by(Site.Group, Phase) %>%
+  summarize(row_count = n(), .groups = "drop")
+
 ```
 
 
@@ -138,6 +214,8 @@ merged_df <- merged_df %>%
     TRUE ~ "Other"
   )) %>%
   filter(Site_Type != "Other")
+
+write.csv(merged_df, file = "~/CO_CRA/CO_CRA/Output/Air_Data/Hourly/all_hourly.csv")
 
 # Calculate summary statistics
 summary_stats <- merged_df %>%

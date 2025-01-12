@@ -129,7 +129,7 @@ all_clean$Aromatic_medium = all_clean$i.Propylbenzene + all_clean$n.Propylbenzen
 ```
 
 
-#calculate 50th percentile concentrations for sites/phase and calculate TWA of those values to get overall concentration for each site (start back here)
+#calculate 50th percentile concentrations for sites/phase and calculate TWA of those values to get overall concentration for each site 
 
 ```{r}
 percentiles_df <- all_clean %>%
@@ -173,7 +173,7 @@ sample_size = all_clean %>%
 write.csv(sample_size, file = "~/CO_CRA/CO_CRA/Output/chronic_N.csv")
 
 sample_size = all_clean %>%
-      group_by(Sampling.Site) %>%
+      group_by(Sampling.Site, Phase) %>%
       summarise(N = n())
 
 write.csv(sample_size, file = "~/CO_CRA/CO_CRA/Output/chronic_N_sites.csv")
