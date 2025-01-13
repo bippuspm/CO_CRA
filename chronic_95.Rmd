@@ -5,6 +5,8 @@ date: "2024-05-20"
 output: html_document
 ---
 
+
+
 #load libraries and data
 ```{r}
 library("dplyr")
@@ -237,10 +239,10 @@ write.csv(ozone_HQs, file = "~/CO_CRA/CO_CRA/Output/chronic_ozone_HQs_95.csv")
 
 #format data
 ```{r}
-#filter twa_df for just benzene, ethylbenzene  and format to long
+#filter twa_df for just benzene, ethylbenzene, TCE, PCE and format to long
 twa_cancer = twa_df %>%
-  select(Sampling.Site, Benzene, Ethylbenzene, Aliphatic_low) %>%
-  pivot_longer(cols = c("Benzene", "Ethylbenzene"), names_to = "Chemical", values_to = "Value")
+  select(Sampling.Site, Benzene, Ethylbenzene, C2HCl3, C2Cl4) %>%
+  pivot_longer(cols = c("Benzene", "Ethylbenzene", "C2HCl3", "C2Cl4"), names_to = "Chemical", values_to = "Value")
 
 #calculate total duration for each site from duration_df
 

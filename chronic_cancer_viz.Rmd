@@ -233,13 +233,22 @@ cancer50$Sampling.Site = factor(cancer50$Sampling.Site, levels = c("Anthem", "Wi
 cancer50 <- cancer50 %>%
   filter(Sampling.Site != "Interchange A")
 
+# Update the Chemical names in the dataframe
+cancer50 <- cancer50 %>%
+  mutate(Chemical = case_when(
+    Chemical == "C2Cl4" ~ "PCE",
+    Chemical == "C2HCl3" ~ "TCE",
+    TRUE ~ Chemical
+  ))
+
 # Assign colors from the chosen palette to Chemical categories
 palette_colors = brewer.pal(n = nlevels(as.factor(cancer50$Chemical)), name = "YlGnBu")
 
 # Create a named vector of colors for each Chemical
 chemical_colors = setNames(palette_colors, levels(factor(cancer50$Chemical)))
 
-#make stacked bar plot 
+
+# make stacked bar plot
 bar_cancer50 = ggplot(cancer50, aes(x = Sampling.Site, y = Ind_Risk, fill = Chemical)) +
   geom_bar(stat = "identity", position = "stack") +
   scale_fill_manual(values = chemical_colors) + 
@@ -251,15 +260,14 @@ bar_cancer50 = ggplot(cancer50, aes(x = Sampling.Site, y = Ind_Risk, fill = Chem
   labs(x = "Site", 
        y = "Cancer Risk", 
        fill = "Chemical") +
-  geom_hline(yintercept = 0.0001, linetype = "dashed") +
-  geom_hline(yintercept = 0.000001, linetype = "dashed") +
+  geom_hline(yintercept = 0.0001, linetype = "dashed", color = "red", size = 1.75) +
+  geom_hline(yintercept = 0.000001, linetype = "dashed", color = "red", size = 1.75) +
   theme(axis.text.x = element_text(size = 20, angle = 45, hjust = 1),
         axis.text.y = element_text(size = 20),
         axis.title.x = element_text(size = 22),
         axis.title.y = element_text(size = 22),
         legend.text = element_text(size = 20),
         legend.title = element_text(size = 22))
-
 
 
 bar_cancer50
@@ -283,6 +291,14 @@ cancer95$Sampling.Site = factor(cancer95$Sampling.Site, levels = c("Anthem", "Wi
 cancer95 <- cancer95 %>%
   filter(Sampling.Site != "Interchange A")
 
+# Update the Chemical names in the dataframe
+cancer95 <- cancer95 %>%
+  mutate(Chemical = case_when(
+    Chemical == "C2Cl4" ~ "PCE",
+    Chemical == "C2HCl3" ~ "TCE",
+    TRUE ~ Chemical
+  ))
+
 # Assign colors from the chosen palette to Chemical categories
 palette_colors = brewer.pal(n = nlevels(as.factor(cancer95$Chemical)), name = "YlGnBu")
 
@@ -301,8 +317,8 @@ bar_cancer95 = ggplot(cancer95, aes(x = Sampling.Site, y = Ind_Risk, fill = Chem
   labs(x = "Site", 
        y = "Cancer Risk", 
        fill = "Chemical") +
-  geom_hline(yintercept = 0.0001, linetype = "dashed") +
-  geom_hline(yintercept = 0.000001, linetype = "dashed") +
+  geom_hline(yintercept = 0.0001, linetype = "dashed", color = "red", size = 1.75) +
+  geom_hline(yintercept = 0.000001, linetype = "dashed", color = "red", size = 1.75) +
   theme(axis.text.x = element_text(size = 20, angle = 45, hjust = 1),
         axis.text.y = element_text(size = 20),
         axis.title.x = element_text(size = 22),
