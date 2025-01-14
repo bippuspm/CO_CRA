@@ -249,25 +249,31 @@ chemical_colors = setNames(palette_colors, levels(factor(cancer50$Chemical)))
 
 
 # make stacked bar plot
-bar_cancer50 = ggplot(cancer50, aes(x = Sampling.Site, y = Ind_Risk, fill = Chemical)) +
+bar_cancer50 <- ggplot(cancer50, aes(x = Sampling.Site, y = Ind_Risk, fill = Chemical)) +
   geom_bar(stat = "identity", position = "stack") +
   scale_fill_manual(values = chemical_colors) + 
   theme_bw() +
-  # Apply scientific labeling to all y-axis breaks
-  scale_y_continuous(breaks = c(1e-6, 5e-5, 1e-4, 1.5e-4, 2e-4),
-                     labels = label_scientific(digits = 1),  # Use label_scientific to format y-axis labels
-                     expand = c(0, 0)) +  # Make bars flush with the x-axis
-  labs(x = "Site", 
-       y = "Cancer Risk", 
-       fill = "Chemical") +
-  geom_hline(yintercept = 0.0001, linetype = "dashed", color = "red", size = 1.75) +
-  geom_hline(yintercept = 0.000001, linetype = "dashed", color = "red", size = 1.75) +
-  theme(axis.text.x = element_text(size = 20, angle = 45, hjust = 1),
-        axis.text.y = element_text(size = 20),
-        axis.title.x = element_text(size = 22),
-        axis.title.y = element_text(size = 22),
-        legend.text = element_text(size = 20),
-        legend.title = element_text(size = 22))
+  scale_y_continuous(
+    breaks = c(1e-6, 5e-5, 1e-4, 1.5e-4, 2e-4, 2.5e-4),  
+    labels = scales::label_scientific(digits = 2),  # Consistent scientific labels
+    expand = c(0, 0),
+    limits = c(0, 2.6e-4) 
+  ) +
+  labs(
+    x = "Site", 
+    y = "Cancer Risk", 
+    fill = "Chemical"
+  ) +
+  geom_hline(yintercept = 1e-4, linetype = "dashed", color = "red", size = 1.75) +
+  geom_hline(yintercept = 1e-6, linetype = "dashed", color = "red", size = 1.75) +
+  theme(
+    axis.text.x = element_text(size = 20, angle = 45, hjust = 1),
+    axis.text.y = element_text(size = 20),
+    axis.title.x = element_text(size = 22),
+    axis.title.y = element_text(size = 22),
+    legend.text = element_text(size = 20),
+    legend.title = element_text(size = 22)
+  )
 
 
 bar_cancer50
@@ -311,9 +317,10 @@ bar_cancer95 = ggplot(cancer95, aes(x = Sampling.Site, y = Ind_Risk, fill = Chem
   scale_fill_manual(values = chemical_colors) + 
   theme_bw() +
   # Apply scientific labeling to all y-axis breaks
-  scale_y_continuous(breaks = c(1e-6, 5e-5, 1e-4, 1.5e-4, 2e-4, 2.5e-4, 3e-4),
-                     labels = label_scientific(digits = 1),  # Use label_scientific to format y-axis labels
-                     expand = c(0, 0)) +  # Make bars flush with the x-axis
+  scale_y_continuous(breaks = c(1e-6, 5e-5, 1e-4, 1.5e-4, 2e-4, 2.5e-4, 3e-4, 3.5e-4, 3.5e-4),
+                     labels = label_scientific(digits = 2),  # Use label_scientific to format y-axis labels
+                     expand = c(0, 0), 
+                     limits = c(0, 3.6e-4)) + 
   labs(x = "Site", 
        y = "Cancer Risk", 
        fill = "Chemical") +
