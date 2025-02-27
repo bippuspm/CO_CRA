@@ -104,6 +104,9 @@ percentiles_df <- all_clean %>%
   group_by(Sampling.Site, Phase) %>%
   summarise_at(vars(Benzene, Ethylbenzene, Toluene, Xylenes, n.Octane, n.Nonane, n.Decane, Ozone, Aliphatic_low, Aromatic_medium, Styrene, C2HCl3, C2Cl4, Propene), ~ quantile(., 0.95, na.rm = TRUE))
 
+#save
+write.csv(percentiles_df, file = "~/CO_CRA/CO_CRA/Output/acute_concs_95.csv")
+
 #format twa_df to long to match up to acute_rfcs column
 perc_long = percentiles_df %>%
   pivot_longer(cols = c("Benzene", "Ethylbenzene", "Toluene", "Xylenes", "n.Octane", "n.Nonane", "n.Decane", "Ozone", "Aliphatic_low", "Aromatic_medium", "Styrene", "C2HCl3", "C2Cl4", "Propene"), names_to = "Chemical", values_to = "Value")
