@@ -75,7 +75,7 @@ Ozone,acute,cardiovascular,300
 Ozone,acute,respiratory,60
 Ozone,acute,hepatic,250
 Ozone,acute,neurological,300
-Aliphatic_low,chronic,nervous,97.47530187
+Aliphatic_low,chronic,neurological,97.47530187
 Aliphatic_low,chronic,respiratory,170.0201908
 Aliphatic_low,chronic,developmental,1700.201908
 Aliphatic_low,chronic,hepatic,283.3669846
@@ -83,7 +83,7 @@ Aliphatic_low,chronic,reproductive,1000
 Aliphatic_low,acute,developmental,2000
 Aliphatic_low,acute,neurological,5000
 Aliphatic_low,acute,reproductive,5000
-Aromatic_medium,chronic,nervous,12.19069806
+Aromatic_medium,chronic,neurological,12.19069806
 Aromatic_medium,chronic,developmental,203.178301
 Aromatic_medium,chronic,hepatic,81.27132041
 Aromatic_medium,chronic,renal,81.27132041

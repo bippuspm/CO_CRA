@@ -27,7 +27,7 @@ library("stringr")
 
 ozone = read.csv("~/CO_CRA/CO_CRA/Data/ozone_hourly_2018-2023.csv")
 vocs = read.csv("~/CO_CRA/CO_CRA/Data/hourly_VOCs.csv")
-rfcs = read.csv("~/CO_CRA/CO_CRA/Data/RfCs.csv")
+rfcs = read.csv("~/CO_CRA/CO_CRA/Data/RfCs_April2026.csv")
 ```
 
 
@@ -49,7 +49,7 @@ ozone <- ozone %>%
 merged_df <- vocs %>%
   left_join(ozone, by = c("Date" = "Date.Local", "Hour"))
 
-# Calculate the 95th percentile of Sample.Measurement for each Date and Hour
+# Calculate the 50th percentile of Sample.Measurement for each Date and Hour
 detach(package:Rmisc)
 detach(package:plyr)
 
@@ -70,7 +70,7 @@ all_clean = vocs %>%
 ## Calculating HIs including ozone ##
 
 
-#format data to calculate chronic HQs and HIs
+#format data to calculate acute HQs and HIs
 ```{r}
 #filter RfCs for acute
 acute_rfcs = rfcs %>% filter(Exposure == "acute")

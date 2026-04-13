@@ -27,7 +27,7 @@ library("stringr")
 
 ozone = read.csv("~/CO_CRA/CO_CRA/Data/ozone_hourly_2018-2023.csv")
 vocs = read.csv("~/CO_CRA/CO_CRA/Data/hourly_VOCs.csv")
-rfcs = read.csv("~/CO_CRA/CO_CRA/Data/RfCs.csv")
+rfcs = read.csv("~/CO_CRA/CO_CRA/Data/RfCs_April2026.csv")
 ```
 
 

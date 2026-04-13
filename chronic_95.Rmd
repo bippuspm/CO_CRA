@@ -37,7 +37,7 @@ nwb = read.csv("~/CO_CRA/CO_CRA/Data/weekly_NWB.csv")
 united = read.csv("~/CO_CRA/CO_CRA/Data/weekly_United.csv")
 wildgrass = read.csv("~/CO_CRA/CO_CRA/Data/weekly_Wildgrass.csv")
 
-rfcs = read.csv("~/CO_CRA/CO_CRA/Data/RfCs.csv")
+rfcs = read.csv("~/CO_CRA/CO_CRA/Data/RfCs_April2026.csv")
 iurs = read.csv("~/CO_CRA/CO_CRA/Data/IURs.csv")
 ```
 

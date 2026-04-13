@@ -360,10 +360,24 @@ brewer.pal(n = 9, name = "YlGnBu")
 
 chemical_colors = c("Aliphatic_low" = "#FFFFD9", "Aromatic_medium" = "#EDF8B1", "Benzene" = "#D9E57A", "Ethylbenzene" = "#C7E9B4", "n.Nonane" = "#7FCDBB", "Ozone" = "#6AB4A7", "PCE" = "#41B6C4", "Styrene" = "#1D91C0", "TCE" = "#225EA8", "Toluene" = "#253494", "Xylenes" = "#081D58")
 
-#make stacked bar plot 
+
+# Define the custom legend labels with chemical names and codes in parentheses
+chemical_labels = c("Aliphatic_low" = "Aliphatic low (Al)", 
+                    "Aromatic_medium" = "Aromatic medium (Am)", 
+                    "Benzene" = "Benzene (B)", 
+                    "Ethylbenzene" = "Ethylbenzene (E)", 
+                    "n.Nonane" = "n.Nonane (N)", 
+                    "Ozone" = "Ozone (O)", 
+                    "PCE" = "PCE (P)", 
+                    "Styrene" = "Styrene (S)", 
+                    "TCE" = "TCE (T)", 
+                    "Toluene" = "Toluene (To)", 
+                    "Xylenes" = "Xylenes (X)")
+
+# Create the plot with updated legend labels
 bar_immuno95_phase = ggplot(HQ95_immuno, aes(x = Phase, y = average_HQ, fill = Chemical)) +
   geom_bar(stat = "identity", position = "stack") +
-  scale_fill_manual(values = chemical_colors) +  # Use custom colors from RColorBrewer palette
+  scale_fill_manual(values = chemical_colors, labels = chemical_labels) +  # Use custom labels for the legend
   theme_bw() +
   labs(x = "Phase", 
        y = "Average HQ", 
@@ -377,9 +391,13 @@ bar_immuno95_phase = ggplot(HQ95_immuno, aes(x = Phase, y = average_HQ, fill = C
         legend.text = element_text(size = 20),
         legend.title = element_text(size = 22))
 
-bar_immuno95_phase
+# Print the plot
+print(bar_immuno95_phase)
 
+# Save the plot as PNG
 ggsave(filename = "bar_acuteHQ95_immuno_phase_OG.png", device = "png", plot = bar_immuno95_phase, path = "~/CO_CRA/CO_CRA/Output/", width = 7, height = 10)
+
+
 ```
 
 
@@ -397,7 +415,7 @@ HQ95_resp = HQ95 %>%
 #make stacked bar plot 
 bar_resp95_phase = ggplot(HQ95_resp, aes(x = Phase, y = average_HQ, fill = Chemical)) +
   geom_bar(stat = "identity", position = "stack") +
-  scale_fill_manual(values = chemical_colors) +  # Use custom colors from RColorBrewer palette
+  scale_fill_manual(values = chemical_colors, labels = chemical_labels) +  # Use custom labels for the legend
   theme_bw() +
   labs(x = "Phase", 
        y = "Average HQ", 
@@ -432,8 +450,7 @@ HQ95_dev = HQ95 %>%
 #make stacked bar plot 
 bar_dev95_phase = ggplot(HQ95_dev, aes(x = Phase, y = average_HQ, fill = Chemical)) +
   geom_bar(stat = "identity", position = "stack") +
-  scale_fill_manual(values = chemical_colors,
-                     labels = c("Aliphatic_low" = "Aliphatic Low")) +  # Use custom colors from RColorBrewer palette; rename part of legend
+  scale_fill_manual(values = chemical_colors, labels = chemical_labels) +  # Use custom labels for the legend
   theme_bw() +
   labs(x = "Phase", 
        y = "Average HQ", 
@@ -468,8 +485,7 @@ HQ95_repro = HQ95 %>%
 #make stacked bar plot 
 bar_repro95_phase = ggplot(HQ95_repro, aes(x = Phase, y = average_HQ, fill = Chemical)) +
   geom_bar(stat = "identity", position = "stack") +
-  scale_fill_manual(values = chemical_colors,
-                     labels = c("Aliphatic_low" = "Aliphatic Low")) +  # Use custom colors from RColorBrewer palette; rename part of legend
+  scale_fill_manual(values = chemical_colors, labels = chemical_labels) +  # Use custom labels for the legend
   theme_bw() +
   labs(x = "Phase", 
        y = "Average HQ", 
@@ -504,8 +520,7 @@ HQ95_neuro = HQ95 %>%
 #make stacked bar plot 
 bar_neuro95_phase = ggplot(HQ95_neuro, aes(x = Phase, y = average_HQ, fill = Chemical)) +
   geom_bar(stat = "identity", position = "stack") +
-  scale_fill_manual(values = chemical_colors,
-                     labels = c("Aliphatic_low" = "Aliphatic Low", "Aromatic_medium" = "Aromatic Medium", "n.Nonane" = "n-Nonane")) +  # Use custom colors from RColorBrewer palette; rename part of legend
+  scale_fill_manual(values = chemical_colors, labels = chemical_labels) +  # Use custom labels for the legend
   theme_bw() +
   labs(x = "Phase", 
        y = "Average HQ", 
@@ -526,22 +541,22 @@ ggsave(filename = "bar_acuteHQ95_neuro_phase_OG.png", device = "png", plot = bar
 ```
 
 
-## looking at the stacked bar for the hepatic effects for the Northwest site to see what causes it to go above 1
+## looking at the stacked bar for the hematological effects for the Northwest site to see what causes it to go above 1
 
 ```{r}
 #filter for hepatic endpoint and get the average HQ of each site for each phase
-HQ95_hep = HQ95 %>%
+HQ95_hem = HQ95 %>%
   filter(Sampling.Site == "Northwest") %>%
-  filter(Endpoint == "hepatic") %>%
+  filter(Endpoint == "hematological") %>%
   group_by(Phase, Chemical) %>%
   summarize(average_HQ = mean(HQ, na.rm = TRUE)) %>%
   ungroup()
 
 
 #make stacked bar plot 
-bar_hep95_phase = ggplot(HQ95_hep, aes(x = Phase, y = average_HQ, fill = Chemical)) +
+bar_hem95_phase = ggplot(HQ95_hem, aes(x = Phase, y = average_HQ, fill = Chemical)) +
   geom_bar(stat = "identity", position = "stack") +
-  scale_fill_manual(values = chemical_colors) +  # Use custom colors from RColorBrewer palette
+  scale_fill_manual(values = chemical_colors, labels = chemical_labels) +  # Use custom labels for the legend
   theme_bw() +
   labs(x = "Phase", 
        y = "Average HQ", 
@@ -555,9 +570,9 @@ bar_hep95_phase = ggplot(HQ95_hep, aes(x = Phase, y = average_HQ, fill = Chemica
         legend.text = element_text(size = 20),
         legend.title = element_text(size = 22))
 
-bar_hep95_phase
+bar_hem95_phase
 
-ggsave(filename = "bar_acuteHQ95_hep_phase_NW.png", device = "png", plot = bar_hep95_phase, path = "~/CO_CRA/CO_CRA/Output/", width = 7, height = 10)
+ggsave(filename = "bar_acuteHQ95_hema_phase_NW.png", device = "png", plot = bar_hem95_phase, path = "~/CO_CRA/CO_CRA/Output/", width = 7, height = 10)
 
 ```
 
@@ -567,7 +582,12 @@ ggsave(filename = "bar_acuteHQ95_hep_phase_NW.png", device = "png", plot = bar_h
 
 ### stacked bar plots by phase for Anthem ### 
 
-#get raw avg HQs for every phase and endpoint for O&G sites for reporting
+
+
+
+
+
+#get raw avg HQs for every phase and endpoint for anthem sites for reporting
 ```{r}
 HQ95_avg_anthem = HQ95 %>%
   filter(Sampling.Site == "Anthem") %>%
@@ -590,7 +610,7 @@ HQ95_immuno_anthem = HQ95 %>%
 #make stacked bar plot 
 bar_immuno95_phase_anthem = ggplot(HQ95_immuno_anthem, aes(x = Phase, y = HQ, fill = Chemical)) +
   geom_bar(stat = "identity", position = "stack") +
-  scale_fill_manual(values = chemical_colors) +  # Use custom colors from RColorBrewer palette
+  scale_fill_manual(values = chemical_colors, labels = chemical_labels) +  # Use custom labels for the legend
   theme_bw() +
   labs(x = "Phase of Nearby Pad", 
        y = "HQ", 
@@ -603,6 +623,7 @@ bar_immuno95_phase_anthem = ggplot(HQ95_immuno_anthem, aes(x = Phase, y = HQ, fi
         axis.title.y = element_text(size = 22),
         legend.text = element_text(size = 20),
         legend.title = element_text(size = 22))
+
 
 bar_immuno95_phase_anthem
 
@@ -621,7 +642,7 @@ HQ95_resp_anthem = HQ95 %>%
 #make stacked bar plot 
 bar_resp95_phase_anthem = ggplot(HQ95_resp_anthem, aes(x = Phase, y = HQ, fill = Chemical)) +
   geom_bar(stat = "identity", position = "stack") +
-  scale_fill_manual(values = chemical_colors) +  # Use custom colors from RColorBrewer palette
+  scale_fill_manual(values = chemical_colors, labels = chemical_labels) +  # Use custom labels for the legend
   theme_bw() +
   labs(x = "Phase of Nearby Pad", 
        y = "HQ", 
@@ -652,8 +673,7 @@ HQ95_dev_anthem = HQ95 %>%
 #make stacked bar plot 
 bar_dev95_phase_anthem = ggplot(HQ95_dev_anthem, aes(x = Phase, y = HQ, fill = Chemical)) +
   geom_bar(stat = "identity", position = "stack") +
-  scale_fill_manual(values = chemical_colors,
-                     labels = c("Aliphatic_low" = "Aliphatic Low")) +  # Use custom colors from RColorBrewer palette; rename part of legend
+  scale_fill_manual(values = chemical_colors, labels = chemical_labels) +  # Use custom labels for the legend
   theme_bw() +
   labs(x = "Phase of Nearby Pad", 
        y = "HQ", 
@@ -671,6 +691,50 @@ bar_dev95_phase_anthem
 
 ggsave(filename = "bar_acuteHQ95_dev_phase_anthem.png", device = "png", plot = bar_dev95_phase_anthem, path = "~/CO_CRA/CO_CRA/Output/", width = 7, height = 10)
 ```
+
+
+
+
+#stacked bar plot of chemical-specific HQs for hematological effects for each phase (95th percentile) for Anthem
+```{r}
+#filter for hematological endpoint and get the average HQ of each site for each phase
+HQ95_hem_anthem = HQ95 %>%
+  filter(Sampling.Site == "Anthem") %>%
+  filter(Endpoint == "hematological")
+
+
+#make stacked bar plot 
+bar_hem95_phase_anthem = ggplot(HQ95_hem_anthem, aes(x = Phase, y = HQ, fill = Chemical)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = chemical_colors, labels = chemical_labels) +  # Use custom labels for the legend
+  theme_bw() +
+  labs(x = "Phase of Nearby Pad", 
+       y = "HQ", 
+       fill = "Chemical(s)") +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  scale_x_discrete(labels = c("pre" = "Well Completions", "prod" = "Production")) +
+  theme(axis.text.x = element_text(size = 20, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 20),
+        axis.title.x = element_text(size = 22),
+        axis.title.y = element_text(size = 22),
+        legend.text = element_text(size = 20),
+        legend.title = element_text(size = 22))
+
+bar_hem95_phase_anthem
+
+ggsave(filename = "bar_acuteHQ95_hema_phase_anthem.png", device = "png", plot = bar_hem95_phase_anthem, path = "~/CO_CRA/CO_CRA/Output/", width = 7, height = 10)
+```
+
+
+
+
+
+
+
+
+
+
+
 
 
 
