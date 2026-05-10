@@ -17,6 +17,7 @@ library("ggplot2")
 library("tidyr")
 library("grid")
 library("scales")
+library("magick")
 detach(package:Rmisc)
 detach(package:plyr)
 
@@ -339,6 +340,78 @@ ggsave(filename = "bar_cancer95.png", device = "png", plot = bar_cancer95, path 
 ```
 
 
+## code to add chronic heat maps together for MS correction
+
+```{r}
+# Set working directory
+setwd("~/CO_CRA/CO_CRA/Output")
+
+# Define file names and labels
+files <- c(
+  "heat_chronicHI50.png",
+  "heat_chronicHI95.png"
+)
+
+labels <- c("A", "B")
+
+# Get max width to standardize image sizes
+max_width <- max(sapply(files, function(f) {
+  image_info(image_read(f))$width
+}))
+
+# Read, flatten, resize, and annotate images
+imgs <- mapply(function(file, label) {
+
+  img <- image_read(file)
+
+  # Ensure white background
+  img <- image_background(img, "white", flatten = TRUE)
+
+  # Resize to same width
+  img <- image_resize(img, paste0(max_width))
+
+  # Add panel label
+  image_annotate(
+    img,
+    label,
+    size = 100,
+    gravity = "northwest",
+    color = "black",
+    location = "+20+20"
+  )
+
+}, files, labels, SIMPLIFY = FALSE)
+
+# Combine side-by-side
+combined <- image_append(c(imgs[[1]], imgs[[2]]))
+
+# Ensure white background
+combined <- image_background(combined, "white", flatten = TRUE)
+
+# Save PDF
+image_write(
+  combined,
+  path = "heat_chronic_bysite_combined.pdf",
+  density = "300x300",
+  format = "pdf"
+)
+
+# Save TIFF for publication
+image_write(
+  combined,
+  path = "heat_chronic_bysite_combined.tif",
+  format = "tiff",
+  density = "300x300",
+  compression = "lzw"
+)
+
+# Optional PNG output
+image_write(
+  combined,
+  path = "heat_chronic_bysite_combined.png",
+  format = "png"
+)
+```
 
 
 

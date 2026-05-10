@@ -64,6 +64,8 @@ percentiles_df$ozone = percentiles_df$ozone*1000
 all_clean = vocs %>%
   left_join(percentiles_df, by = c("Sampling.Site", "Phase", "Date", "Hour"))
 
+#save percentiles df for QC
+write.csv(all_clean, file = "~/CO_CRA/CO_CRA/Output/hourly_ozone_VOCs.csv")
 ```
 
 
@@ -81,8 +83,10 @@ all_clean$Xylenes = all_clean$o.Xylene + all_clean$m..and.p.Xylene
 acute_rfcs$Chemical = gsub("n-octane", "n.Octane", acute_rfcs$Chemical)
 acute_rfcs$Chemical = gsub("n-nonane", "n.Nonane", acute_rfcs$Chemical)
 acute_rfcs$Chemical = gsub("n-decane", "n.Decane", acute_rfcs$Chemical)
-acute_rfcs$Chemical = gsub("Trichloroethylene", "C2HCl3", acute_rfcs$Chemical)
-acute_rfcs$Chemical = gsub("Tetrachloroethylene", "C2Cl4", acute_rfcs$Chemical)
+acute_rfcs$Chemical = gsub("Trichloroethylene (TCE)", "C2HCl3", acute_rfcs$Chemical, fixed = TRUE)
+acute_rfcs$Chemical = gsub("Tetrachloroethylene (PCE)", "C2Cl4", acute_rfcs$Chemical, fixed = TRUE)
+acute_rfcs$Chemical = gsub("Aliphatic low", "Aliphatic_low", acute_rfcs$Chemical)
+acute_rfcs$Chemical = gsub("Aromatic medium", "Aromatic_medium", acute_rfcs$Chemical)
 
 colnames(all_clean)[colnames(all_clean) == "ozone"] = "Ozone"
 
@@ -113,6 +117,9 @@ sample_size = all_clean %>%
       summarise(N = n())
 
 write.csv(sample_size, file = "~/CO_CRA/CO_CRA/Output/acute_N.csv")
+
+#save percentiles df for QC
+write.csv(percentiles_df, file = "~/CO_CRA/CO_CRA/Output/final_hourly_50.csv")
 ```
 
 

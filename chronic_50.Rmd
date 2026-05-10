@@ -57,6 +57,9 @@ wildgrass$Sampling.Site = "Wildgrass"
 
 #combine
 all = bind_rows(anthem, commons, ica, icb, livingston, nwa, nwb, united, wildgrass)
+
+#save the combined file for easy read
+write.csv(all, file = "~/CO_CRA/CO_CRA/Data/weekly_VOCs_combined.csv")
 ```
 
 
@@ -95,6 +98,9 @@ all$Ozone <- ozone_percentiles
 
 #multiply ozone values by 1000 to convert to ppb
 all$Ozone = all$Ozone*1000
+
+#save for QC
+write.csv(all, file = "~/CO_CRA/CO_CRA/Data/weekly_VOC_ozone50.csv")
 ```
 
 
@@ -119,8 +125,10 @@ all_clean$Xylenes = all_clean$o.Xylene + all_clean$m..and.p.Xylene
 chronic_rfcs$Chemical = gsub("n-octane", "n.Octane", chronic_rfcs$Chemical)
 chronic_rfcs$Chemical = gsub("n-nonane", "n.Nonane", chronic_rfcs$Chemical)
 chronic_rfcs$Chemical = gsub("n-decane", "n.Decane", chronic_rfcs$Chemical)
-chronic_rfcs$Chemical = gsub("Trichloroethylene", "C2HCl3", chronic_rfcs$Chemical)
-chronic_rfcs$Chemical = gsub("Tetrachloroethylene", "C2Cl4", chronic_rfcs$Chemical)
+chronic_rfcs$Chemical = gsub("Trichloroethylene (TCE)", "C2HCl3", chronic_rfcs$Chemical, fixed = TRUE)
+chronic_rfcs$Chemical = gsub("Tetrachloroethylene (PCE)", "C2Cl4", chronic_rfcs$Chemical, fixed = TRUE)
+chronic_rfcs$Chemical = gsub("Aliphatic low", "Aliphatic_low", chronic_rfcs$Chemical)
+chronic_rfcs$Chemical = gsub("Aromatic medium", "Aromatic_medium", chronic_rfcs$Chemical)
 
 #add chemical concentrations together for aliphatic low and aromatic medium groups
 all_clean$Aliphatic_low = all_clean$n.Octane + all_clean$i.Pentane + all_clean$n.Pentane + all_clean$trans.2.Pentene + all_clean$X1.Pentene + all_clean$cis.2.Pentene + all_clean$n.Hexane + all_clean$Isoprene + all_clean$X2.4.Dimethylpentane + all_clean$n.Heptane + all_clean$Cyclohexane + all_clean$X2.3.Dimethylpentane + all_clean$X2.Methylhexane + all_clean$X3.Methylhexane + all_clean$X2.2.4.Trimethylpentane + all_clean$Methylcyclohexane + all_clean$X2.3.4.Trimethylpentane + all_clean$X2.Methylheptane + all_clean$X3.Methylheptane + all_clean$Cycopentane
@@ -138,7 +146,7 @@ percentiles_df <- all_clean %>%
 
 #Save percentiles df to add overall start and stop dates for each phase for each site, and read back in to calculate durations for each site
 
-write.csv(percentiles_df, file = "~/CO_CRA/CO_CRA/Data/percentiles_df_50.csv")
+write.csv(percentiles_df, file = "~/CO_CRA/CO_CRA/Data/weekly_percentiles_df_50.csv")
 duration_df = read.csv(file = "~/CO_CRA/CO_CRA/Data/duration_df_50.csv")
 
 duration_df <- duration_df %>%
@@ -154,6 +162,9 @@ duration_df <- duration_df %>%
 
 duration_df <- duration_df %>%
   mutate(Duration = ifelse(Sampling.Site == "Commons", 10950, Duration))
+
+#save duration df for QC
+write.csv(duration_df, file = "~/CO_CRA/CO_CRA/Output/weekly_50_forTWA.csv")
 
 #Calculate TWA for each chemical for each sampling site
 twa_df <- duration_df %>%
@@ -177,6 +188,9 @@ sample_size = all_clean %>%
       summarise(N = n())
 
 write.csv(sample_size, file = "~/CO_CRA/CO_CRA/Output/chronic_N_sites.csv")
+
+#save TWA file for QC
+write.csv(twa_long, file = "~/CO_CRA/CO_CRA/Output/chronic_TWAs_50.csv")
 ```
 
 

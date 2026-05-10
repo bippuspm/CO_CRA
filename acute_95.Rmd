@@ -81,8 +81,10 @@ all_clean$Xylenes = all_clean$o.Xylene + all_clean$m..and.p.Xylene
 acute_rfcs$Chemical = gsub("n-octane", "n.Octane", acute_rfcs$Chemical)
 acute_rfcs$Chemical = gsub("n-nonane", "n.Nonane", acute_rfcs$Chemical)
 acute_rfcs$Chemical = gsub("n-decane", "n.Decane", acute_rfcs$Chemical)
-acute_rfcs$Chemical = gsub("Trichloroethylene", "C2HCl3", acute_rfcs$Chemical)
-acute_rfcs$Chemical = gsub("Tetrachloroethylene", "C2Cl4", acute_rfcs$Chemical)
+acute_rfcs$Chemical = gsub("Trichloroethylene (TCE)", "C2HCl3", acute_rfcs$Chemical, fixed = TRUE)
+acute_rfcs$Chemical = gsub("Tetrachloroethylene (PCE)", "C2Cl4", acute_rfcs$Chemical, fixed = TRUE)
+acute_rfcs$Chemical = gsub("Aliphatic low", "Aliphatic_low", acute_rfcs$Chemical)
+acute_rfcs$Chemical = gsub("Aromatic medium", "Aromatic_medium", acute_rfcs$Chemical)
 
 colnames(all_clean)[colnames(all_clean) == "ozone"] = "Ozone"
 
@@ -110,6 +112,9 @@ write.csv(percentiles_df, file = "~/CO_CRA/CO_CRA/Output/acute_concs_95.csv")
 #format twa_df to long to match up to acute_rfcs column
 perc_long = percentiles_df %>%
   pivot_longer(cols = c("Benzene", "Ethylbenzene", "Toluene", "Xylenes", "n.Octane", "n.Nonane", "n.Decane", "Ozone", "Aliphatic_low", "Aromatic_medium", "Styrene", "C2HCl3", "C2Cl4", "Propene"), names_to = "Chemical", values_to = "Value")
+
+#save percentiles df for QC
+write.csv(percentiles_df, file = "~/CO_CRA/CO_CRA/Output/final_hourly_95.csv")
 
 ```
 
