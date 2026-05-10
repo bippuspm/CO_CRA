@@ -15,6 +15,7 @@ library("rstatix")
 library("ggplot2")
 library("tidyr")
 library("RColorBrewer")
+library("magick")
 detach(package:Rmisc)
 detach(package:plyr)
 
@@ -34,7 +35,7 @@ HQ95$Chemical[HQ95$Chemical == "C2HCl3"] = "TCE"
 ### heat maps by site ###
 
 
-#heatmap of acute HIs by site and endpoint - 50th percentile values
+#heatmap of acute HIs by site and endpoint - 50th percentile values (not used in MS)
 ```{r}
 #get the average HI (either from drilling, pre, or prod) for each site
 HI50_clean = HI50 %>%
@@ -79,7 +80,7 @@ ggsave(filename = "heat_acuteHI50_site.png", device = "png", plot = heat_HI50, p
 ```
 
 
-#heatmap of acute HIs by site and endpoint - 95th percentile values
+#heatmap of acute HIs by site and endpoint - 95th percentile values (not used in MS)
 ```{r}
 #get the average HI (either from drilling, pre, or prod) for each site
 HI95_clean = HI95 %>%
@@ -541,12 +542,11 @@ ggsave(filename = "bar_acuteHQ95_neuro_phase_OG.png", device = "png", plot = bar
 ```
 
 
-## looking at the stacked bar for the hematological effects for the Northwest site to see what causes it to go above 1
-
+#stacked bar plot of chemical-specific HQs for hematological effects for each phase (95th percentile) for O&G only
 ```{r}
-#filter for hepatic endpoint and get the average HQ of each site for each phase
-HQ95_hem = HQ95 %>%
-  filter(Sampling.Site == "Northwest") %>%
+#filter for hematological endpoint and get the average HQ of each site for each phase
+HQ95_hema = HQ95 %>%
+  filter(Sampling.Site == "Interchange A" | Sampling.Site == "Interchange B" | Sampling.Site == "Livingston" | Sampling.Site == "Northwest A" | Sampling.Site == "Northwest B" | Sampling.Site == "United") %>%
   filter(Endpoint == "hematological") %>%
   group_by(Phase, Chemical) %>%
   summarize(average_HQ = mean(HQ, na.rm = TRUE)) %>%
@@ -554,7 +554,7 @@ HQ95_hem = HQ95 %>%
 
 
 #make stacked bar plot 
-bar_hem95_phase = ggplot(HQ95_hem, aes(x = Phase, y = average_HQ, fill = Chemical)) +
+bar_hema95_phase = ggplot(HQ95_hema, aes(x = Phase, y = average_HQ, fill = Chemical)) +
   geom_bar(stat = "identity", position = "stack") +
   scale_fill_manual(values = chemical_colors, labels = chemical_labels) +  # Use custom labels for the legend
   theme_bw() +
@@ -570,9 +570,9 @@ bar_hem95_phase = ggplot(HQ95_hem, aes(x = Phase, y = average_HQ, fill = Chemica
         legend.text = element_text(size = 20),
         legend.title = element_text(size = 22))
 
-bar_hem95_phase
+bar_hema95_phase
 
-ggsave(filename = "bar_acuteHQ95_hema_phase_NW.png", device = "png", plot = bar_hem95_phase, path = "~/CO_CRA/CO_CRA/Output/", width = 7, height = 10)
+ggsave(filename = "bar_acuteHQ95_hema_phase_OG.png", device = "png", plot = bar_hema95_phase, path = "~/CO_CRA/CO_CRA/Output/", width = 7, height = 10)
 
 ```
 
@@ -725,9 +725,324 @@ bar_hem95_phase_anthem
 ggsave(filename = "bar_acuteHQ95_hema_phase_anthem.png", device = "png", plot = bar_hem95_phase_anthem, path = "~/CO_CRA/CO_CRA/Output/", width = 7, height = 10)
 ```
 
+## combining images for MS correction ##
+
+
+#O&G site heat maps
+```{r}
+# Set working directory
+setwd("~/CO_CRA/CO_CRA/Output")
+
+# Define file names and labels
+files <- c(
+  "heat_acuteHI50_phase_OG.png",
+  "heat_acuteHI95_phase_OG.png"
+)
+
+labels <- c("A", "B")
+
+# Get max width to standardize image sizes
+max_width <- max(sapply(files, function(f) {
+  image_info(image_read(f))$width
+}))
+
+# Read, flatten, resize, and annotate images
+imgs <- mapply(function(file, label) {
+
+  img <- image_read(file)
+
+  # Ensure white background
+  img <- image_background(img, "white", flatten = TRUE)
+
+  # Resize to same width
+  img <- image_resize(img, paste0(max_width))
+
+  # Add panel label
+  image_annotate(
+    img,
+    label,
+    size = 100,
+    gravity = "northwest",
+    color = "black",
+    location = "+20+20"
+  )
+
+}, files, labels, SIMPLIFY = FALSE)
+
+# Combine side-by-side
+combined <- image_append(c(imgs[[1]], imgs[[2]]))
+
+# Ensure white background
+combined <- image_background(combined, "white", flatten = TRUE)
+
+# Save PDF
+image_write(
+  combined,
+  path = "heat_OG_combined.pdf",
+  density = "300x300",
+  format = "pdf"
+)
+
+# Save TIFF for publication
+image_write(
+  combined,
+  path = "heat_OG_combined.tif",
+  format = "tiff",
+  density = "300x300",
+  compression = "lzw"
+)
+
+# Optional PNG output
+image_write(
+  combined,
+  path = "heat_OG_combined.png",
+  format = "png"
+)
+```
+
+
+#anthem heat maps
+```{r}
+# Set working directory
+setwd("~/CO_CRA/CO_CRA/Output")
+
+# Define file names and labels
+files <- c(
+  "heat_acuteHI50_phase_anthem.png",
+  "heat_acuteHI95_phase_anthem.png"
+)
+
+labels <- c("A", "B")
+
+# Get max width to standardize image sizes
+max_width <- max(sapply(files, function(f) {
+  image_info(image_read(f))$width
+}))
+
+# Read, flatten, resize, and annotate images
+imgs <- mapply(function(file, label) {
+
+  img <- image_read(file)
+
+  # White background
+  img <- image_background(img, "white", flatten = TRUE)
+
+  # Standardize width
+  img <- image_resize(img, paste0(max_width))
+
+  # Add panel label (A/B)
+  image_annotate(
+    img,
+    label,
+    size = 100,   
+    gravity = "northwest",
+    color = "black",
+    location = "+20+20"
+  )
+
+}, files, labels, SIMPLIFY = FALSE)
+
+# Combine side-by-side
+combined <- image_append(c(imgs[[1]], imgs[[2]]))
+
+# Ensure clean white background
+combined <- image_background(combined, "white", flatten = TRUE)
+
+# Save outputs
+image_write(
+  combined,
+  path = "heat_anthem_combined.pdf",
+  density = "300x300",
+  format = "pdf"
+)
+
+image_write(
+  combined,
+  path = "heat_anthem_combined.tif",
+  format = "tiff",
+  density = "300x300",
+  compression = "lzw"
+)
+
+image_write(
+  combined,
+  path = "heat_anthem_combined.png",
+  format = "png"
+)
+```
 
 
 
+#O&G site chemical contributions
+```{r}
+# Set working directory
+setwd("~/CO_CRA/CO_CRA/Output")
+
+# Files in correct order
+files <- c(
+  "bar_acuteHQ95_dev_phase_OG.png",
+  "bar_acuteHQ95_repro_phase_OG.png",
+  "bar_acuteHQ95_resp_phase_OG.png",
+  "bar_acuteHQ95_neuro_phase_OG.png",
+  "bar_acuteHQ95_immuno_phase_OG.png",
+  "bar_acuteHQ95_hema_phase_OG.png"
+)
+
+# Labels
+labels <- c("A", "B", "C", "D", "E", "F")
+
+# Standardize size
+max_width  <- max(sapply(files, function(f) image_info(image_read(f))$width))
+max_height <- max(sapply(files, function(f) image_info(image_read(f))$height))
+
+# Read, resize, annotate
+imgs <- mapply(function(file, label) {
+
+  img <- image_read(file)
+  img <- image_background(img, "white", flatten = TRUE)
+
+  # standardize canvas so all images align perfectly
+img <- image_extent(
+  img,
+  geometry = paste0(max_width, "x", max_height),
+  gravity = "center",
+  color = "white"
+)
+
+  image_annotate(
+    img,
+    label,
+    size = 100,
+    gravity = "northwest",
+    color = "black",
+    location = "+20+20"
+  )
+
+}, files, labels, SIMPLIFY = FALSE)
+
+# --- ROWS (3 per row) ---
+row1 <- image_append(c(imgs[[1]], imgs[[2]], imgs[[3]]))
+row2 <- image_append(c(imgs[[4]], imgs[[5]], imgs[[6]]))
+
+# Stack rows
+combined <- image_append(c(row1, row2), stack = TRUE)
+
+# Ensure clean background
+combined <- image_background(combined, "white", flatten = TRUE)
+
+# Save outputs
+image_write(
+  combined,
+  path = "bar_acuteHQ95_combined_OG.pdf",
+  format = "pdf",
+  density = "300x300"
+)
+
+image_write(
+  combined,
+  path = "bar_acuteHQ95_combined_OG.tif",
+  format = "tiff",
+  density = "300x300",
+  compression = "lzw"
+)
+
+image_write(
+  combined,
+  path = "bar_acuteHQ95_combined_OG.png",
+  format = "png"
+)
+
+#combined PDF not working in magick, trying work around (still not working - will come back if journal needs it)
+library(grid)
+
+# Convert magick object to something grid can reliably render
+img_grob <- grid::rasterGrob(
+  as.raster(combined),
+  width = unit(1, "npc"),
+  height = unit(1, "npc")
+)
+
+pdf("bar_acuteHQ95_combined_OG.pdf", width = 11, height = 8.5)
+grid.draw(img_grob)
+dev.off()
+```
+
+
+
+#anthem chemical contributions
+```{r}
+# Set working directory
+setwd("~/CO_CRA/CO_CRA/Output")
+
+# Files (3-panel Anthem set; dev removed)
+files <- c(
+  "bar_acuteHQ95_immuno_phase_anthem.png",
+  "bar_acuteHQ95_resp_phase_anthem.png",
+  "bar_acuteHQ95_hema_phase_anthem.png"
+)
+
+# Labels
+labels <- c("A", "B", "C")
+
+library(magick)
+
+# Standardize size
+max_width  <- max(sapply(files, function(f) image_info(image_read(f))$width))
+max_height <- max(sapply(files, function(f) image_info(image_read(f))$height))
+
+# Read, resize, annotate
+imgs <- mapply(function(file, label) {
+
+  img <- image_read(file)
+  img <- image_background(img, "white", flatten = TRUE)
+
+  # standardize canvas
+  img <- image_extent(
+    img,
+    geometry = paste0(max_width, "x", max_height),
+    gravity = "center",
+    color = "white"
+  )
+
+  image_annotate(
+    img,
+    label,
+    size = 100,
+    gravity = "northwest",
+    color = "black",
+    location = "+20+20"
+  )
+
+}, files, labels, SIMPLIFY = FALSE)
+
+# --- SINGLE ROW (3 panels) ---
+combined <- image_append(c(imgs[[1]], imgs[[2]], imgs[[3]]))
+
+# Clean background
+combined <- image_background(combined, "white", flatten = TRUE)
+
+# Save PNG
+image_write(
+  combined,
+  path = "bar_acuteHQ95_combined_anthem.png",
+  format = "png"
+)
+
+# Save TIFF
+image_write(
+  combined,
+  path = "bar_acuteHQ95_combined_anthem.tif",
+  format = "tiff",
+  compression = "lzw"
+)
+
+# Reliable PDF export
+library(grid)
+
+pdf("bar_acuteHQ95_combined_anthem.pdf", width = 11, height = 4)
+grid.raster(combined)
+dev.off()
+```
 
 
 
